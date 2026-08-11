@@ -107,10 +107,6 @@ const NAV = [
   { key: 'audit-sessions', label: 'Audit Sessions', href: 'audit-sessions.html', icon: 'clipboard' },
   { key: 'settlement-queue', label: 'Settlement Queue', href: 'settlement.html', icon: 'list' },
   { key: 'action-tickets', label: 'Action Tickets', href: 'tickets.html', icon: 'ticket' },
-  { key: 'snapshots', label: 'Snapshots', href: '#', icon: 'box', stub: true },
-  { key: 'reports', label: 'Reports', href: '#', icon: 'chart', stub: true },
-  { key: 'settings', label: 'Settings', href: '#', icon: 'gear', stub: true },
-  { key: 'master-data', label: 'Master Data', href: '#', icon: 'db', stub: true },
 ];
 const ICONS = {
   logo: '<path fill="currentColor" d="M12 2c-4 3-7 5-7 10a7 7 0 0 0 14 0c0-5-3-7-7-10Zm0 4c2 1.6 4 3 4 6a4 4 0 0 1-8 0c0-3 2-4.4 4-6Z"/>',

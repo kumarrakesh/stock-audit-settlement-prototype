@@ -76,15 +76,13 @@
       const card = (tile, icon, label, value, sub, link) => `
         <div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div>
           <div class="value">${value}</div><div class="sub">${sub}</div>
-          <div class="foot"><a href="${link.href}"${link.stub ? ' data-stub="1"' : ''}>${link.text} →</a></div></div>`;
+          <div class="foot">${link.href ? `<a href="${link.href}">${link.text} →</a>` : `<span class="note">${link.text}</span>`}</div></div>`;
       document.getElementById('kpis').innerHTML =
         card('blue', 'clipboard', 'Pending Audits', pendingAudits, 'Draft / In Progress', { text: 'View all', href: 'audit-sessions.html' }) +
-        card('orange', 'list', 'Pending Settlements', pendingSettlements, 'Awaiting Review', { text: 'View queue', href: '#', stub: true }) +
-        card('purple', 'ticket', 'Pending Action Tickets', pendingTickets, 'Require Attention', { text: 'View tickets', href: '#', stub: true }) +
+        card('orange', 'list', 'Pending Settlements', pendingSettlements, 'Awaiting Review', { text: 'View queue', href: 'settlement.html' }) +
+        card('purple', 'ticket', 'Pending Action Tickets', pendingTickets, 'Require Attention', { text: 'View tickets', href: 'tickets.html' }) +
         card('green', 'box', 'Completed Audits', STORE.dashboard.completedThisMonth, 'This Month', { text: 'View all', href: 'audit-sessions.html' }) +
-        card('teal', 'box', 'Snapshots Created', STORE.dashboard.snapshotsThisMonth, 'This Month', { text: 'View snapshots', href: '#', stub: true });
-      document.querySelectorAll('#kpis a[data-stub]').forEach((el) =>
-        el.addEventListener('click', (e) => { e.preventDefault(); toast('That screen isn’t part of the session-02 prototype yet.'); }));
+        card('teal', 'box', 'Snapshots Created', STORE.dashboard.snapshotsThisMonth, 'This Month', { text: 'Runs in background', href: null });
     }
 
     function renderVarianceSummary() {
