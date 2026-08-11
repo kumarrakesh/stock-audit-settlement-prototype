@@ -8,7 +8,6 @@
 </head>
 <body>
   <div id="content"></div>
-
   <script src="seed.js"></script>
   <script src="app.js"></script>
   <script>
@@ -20,15 +19,9 @@
     function skeleton() {
       return `
         <div class="page-head">
-          <div>
-            <h1>Audit Sessions</h1>
-            <div class="sub">View and manage all audit sessions</div>
-          </div>
-          <div class="head-actions">
-            <button class="btn primary" id="createBtn">${svg('plus')} Create Audit</button>
-          </div>
+          <div><h1>Audit Sessions</h1><div class="sub">View and manage all audit sessions</div></div>
+          <div class="head-actions"><button class="btn primary" id="createBtn">${svg('plus')} Create Audit</button></div>
         </div>
-
         <section class="filters">
           <div class="filter-grid">
             <div class="field"><label>Warehouse</label><select id="fWarehouse"></select></div>
@@ -43,45 +36,30 @@
             <button class="btn primary" id="applyBtn">Apply Filters</button>
           </div>
         </section>
-
         <section class="panel">
           <div class="tabs" id="tabs"></div>
           <div class="table-wrap"><table>
-            <thead><tr>
-              <th>Audit ID</th><th>Audit Name</th><th>Warehouse</th><th>Entity</th><th>Auditor</th>
-              <th>Status</th><th>Progress</th><th>Counted / Total</th><th>Submitted On</th><th>Updated On</th><th>Actions</th>
-            </tr></thead>
+            <thead><tr><th>Audit ID</th><th>Audit Name</th><th>Warehouse</th><th>Entity</th><th>Auditor</th><th>Status</th><th>Progress</th><th>Counted / Total</th><th>Submitted On</th><th>Updated On</th><th>Actions</th></tr></thead>
             <tbody id="rows"></tbody>
           </table></div>
           <div class="pager" id="pager"></div>
         </section>`;
     }
 
-    function fillSelect(el, items, allLabel, valueKey, labelKey) {
-      el.innerHTML = `<option value="">${allLabel}</option>` +
-        items.map((i) => `<option value="${i[valueKey]}">${i[labelKey]}</option>`).join('');
-    }
-
-    function auditProgress(a) {
-      if (a.products && a.products.length) { return auditTotals(a).pct; }
-      return a.progress || 0;
-    }
+    function fillSelect(el, items, allLabel, vk, lk) { el.innerHTML = `<option value="">${allLabel}</option>` + items.map((i) => `<option value="${i[vk]}">${i[lk]}</option>`).join(''); }
+    function auditProgress(a) { return (a.products && a.products.length) ? auditTotals(a).pct : (a.progress || 0); }
     function auditCounted(a) {
       if (a.products && a.products.length) { const t = auditTotals(a); return t.counted + ' / ' + t.total; }
-      if (a.status === 'cancelled' || a.status === 'draft' && !a.countedTotal) return '–';
+      if (a.status === 'cancelled') return '–';
       return (a.countedTotal || 0) + ' / ' + (a.productTotal || 0);
     }
 
     function baseFiltered() {
-      // Everything except the status facet (so tab counts reflect the other filters).
       return STORE.audits.filter((a) => {
         if (state.warehouse && a.warehouseId !== state.warehouse) return false;
         if (state.entity && a.entity !== state.entity) return false;
         if (state.auditor && a.auditorUserId !== state.auditor) return false;
-        if (state.q) {
-          const hay = (a.id + ' ' + a.name + ' ' + userName(STORE, a.auditorUserId)).toLowerCase();
-          if (!hay.includes(state.q.toLowerCase())) return false;
-        }
+        if (state.q) { const h = (a.id + ' ' + a.name + ' ' + userName(STORE, a.auditorUserId)).toLowerCase(); if (!h.includes(state.q.toLowerCase())) return false; }
         return true;
       });
     }
@@ -89,10 +67,7 @@
     function renderTabs() {
       const base = baseFiltered();
       const count = (st) => st === 'all' ? base.length : base.filter((a) => a.status === st).length;
-      document.getElementById('tabs').innerHTML = STATUS_TABS.map((st) => `
-        <button class="tab${state.status === st ? ' active' : ''}" data-status="${st}">
-          ${st === 'all' ? 'All' : labelize(st)}<span class="count">${count(st)}</span>
-        </button>`).join('');
+      document.getElementById('tabs').innerHTML = STATUS_TABS.map((st) => `<button class="tab${state.status === st ? ' active' : ''}" data-status="${st}">${st === 'all' ? 'All' : labelize(st)}<span class="count">${count(st)}</span></button>`).join('');
       document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
         state.status = t.dataset.status; state.page = 1;
         document.getElementById('fStatus').value = state.status === 'all' ? '' : state.status;
@@ -108,86 +83,275 @@
       if (state.page > pages) state.page = pages;
       const start = (state.page - 1) * PAGE_SIZE;
       const pageRows = list.slice(start, start + PAGE_SIZE);
-
       const tbody = document.getElementById('rows');
-      if (!pageRows.length) {
-        tbody.innerHTML = `<tr><td colspan="11" class="empty">No audit sessions match these filters.</td></tr>`;
-      } else {
+      if (!pageRows.length) { tbody.innerHTML = `<tr><td colspan="11" class="empty">No audit sessions match these filters.</td></tr>`; }
+      else {
         tbody.innerHTML = pageRows.map((a) => {
           const pct = auditProgress(a);
-          const canContinue = a.status === 'in_progress' || a.status === 'draft';
-          const actionLabel = canContinue ? 'Continue' : 'View';
+          const label = (a.status === 'in_progress' || a.status === 'draft') ? 'Continue' : 'View';
           return `<tr class="clickable" data-id="${a.id}">
-            <td class="mono"><a class="strong-link" href="audit-detail.html?id=${a.id}">${a.id}</a></td>
-            <td>${a.name}</td>
-            <td>${warehouseName(STORE, a.warehouseId)}</td>
-            <td>${entityChip(a.entity)}</td>
-            <td>${userName(STORE, a.auditorUserId)}</td>
-            <td>${statusBadge(a.status)}</td>
+            <td class="mono"><span class="strong-link">${a.id}</span></td>
+            <td>${a.name}</td><td>${warehouseName(STORE, a.warehouseId)}</td><td>${entityChip(a.entity)}</td>
+            <td>${userName(STORE, a.auditorUserId)}</td><td>${statusBadge(a.status)}</td>
             <td><div class="progress"><div class="bar"><span style="width:${pct}%"></span></div><span class="pct">${pct}%</span></div></td>
-            <td class="mono">${auditCounted(a)}</td>
-            <td class="mono">${fmtDateTime(a.submittedAt)}</td>
-            <td class="mono">${fmtDateTime(a.updatedAt)}</td>
-            <td><button class="btn sm" data-action="${a.id}">${actionLabel}</button></td>
-          </tr>`;
+            <td class="mono">${auditCounted(a)}</td><td class="mono">${fmtDateTime(a.submittedAt)}</td><td class="mono">${fmtDateTime(a.updatedAt)}</td>
+            <td><button class="btn sm" data-open="${a.id}">${label}</button></td></tr>`;
         }).join('');
       }
-
-      // Pager
-      const showTo = Math.min(start + PAGE_SIZE, totalRows);
-      const showFrom = totalRows ? start + 1 : 0;
+      const showTo = Math.min(start + PAGE_SIZE, totalRows), showFrom = totalRows ? start + 1 : 0;
       let btns = `<button class="page-btn" data-page="prev" ${state.page === 1 ? 'disabled' : ''}>‹</button>`;
       for (let p = 1; p <= pages; p++) btns += `<button class="page-btn${p === state.page ? ' active' : ''}" data-page="${p}">${p}</button>`;
       btns += `<button class="page-btn" data-page="next" ${state.page === pages ? 'disabled' : ''}>›</button>`;
-      document.getElementById('pager').innerHTML =
-        `<div class="info">Showing ${showFrom} to ${showTo} of ${totalRows} entries</div><div class="controls">${btns}</div>`;
-
-      // Wire rows + actions + pager
-      wireClickableRows(document);
-      tbody.querySelectorAll('tr.clickable').forEach((tr) =>
-        tr.addEventListener('click', (e) => { if (!e.target.closest('button')) location.href = 'audit-detail.html?id=' + tr.dataset.id; }));
-      tbody.querySelectorAll('button[data-action]').forEach((b) =>
-        b.addEventListener('click', () => location.href = 'audit-detail.html?id=' + b.dataset.action));
+      document.getElementById('pager').innerHTML = `<div class="info">Showing ${showFrom} to ${showTo} of ${totalRows} entries</div><div class="controls">${btns}</div>`;
+      wireClickableRows(tbody);
+      tbody.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button')) openAuditDrawer(tr.dataset.id); }));
+      tbody.querySelectorAll('button[data-open]').forEach((b) => b.addEventListener('click', () => openAuditDrawer(b.dataset.open)));
       document.querySelectorAll('.page-btn').forEach((b) => b.addEventListener('click', () => {
         const v = b.dataset.page;
-        if (v === 'prev') state.page = Math.max(1, state.page - 1);
-        else if (v === 'next') state.page = Math.min(pages, state.page + 1);
-        else state.page = Number(v);
+        if (v === 'prev') state.page = Math.max(1, state.page - 1); else if (v === 'next') state.page = Math.min(pages, state.page + 1); else state.page = Number(v);
         renderRows();
       }));
     }
-
     function renderAll() { renderTabs(); renderRows(); }
+
+    /* ---------------- L2 drawer: an audit ---------------- */
+    function openAuditDrawer(id, initialTab, openProduct) {
+      const AUD = byId(STORE.audits, id); if (!AUD) return;
+      const EDIT = auditEditable(AUD);
+      const hasProducts = AUD.products && AUD.products.length;
+      const tabs = [{ key: 'overview', label: 'Overview' }, { key: 'products', label: 'Products' }];
+      if (hasProducts) tabs.push({ key: 'review', label: 'Review & Submit' });
+
+      const h = openDrawer({
+        title: `${AUD.name}`, subtitle: `${AUD.id} · ${statusBadge(AUD.status)}`,
+        tabs, active: initialTab || 'overview', onClose: renderAll,
+        render(key, body, foot) {
+          foot.innerHTML = '';
+          if (key === 'overview') renderOverview(AUD, EDIT, body);
+          else if (key === 'products') renderProducts(AUD, EDIT, body, foot, h);
+          else renderReview(AUD, EDIT, body, foot, h);
+        },
+      });
+      h.refresh();
+      if (openProduct) setTimeout(() => productModal(AUD, EDIT, openProduct, h), 0);
+      return h;
+    }
+
+    function auditKpisHtml(AUD) {
+      if (!(AUD.products && AUD.products.length)) return '';
+      const t = auditTotals(AUD);
+      const kpi = (tile, icon, label, value) => `<div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div><div class="value">${value}</div></div>`;
+      return `<div class="kpi-row">${
+        kpi('blue', 'box', 'Products', `${t.counted} / ${t.total}`) + kpi('purple', 'db', 'Expected', fmtQty(t.expected)) +
+        kpi('green', 'clipboard', 'Actual', fmtQty(t.actual)) + kpi('orange', 'chart', 'Variance', `<span class="${t.variance < 0 ? 'neg' : t.variance > 0 ? 'pos' : 'zero'}">${fmtQty(t.variance)}</span>`) +
+        kpi('red', 'list', 'Missing', `<span class="neg">${fmtQty(t.missing)}</span>`) + kpi('green', 'plus', 'Extra', `<span class="pos">${fmtQty(t.extra)}</span>`)}</div>`;
+    }
+
+    function renderOverview(AUD, EDIT, body) {
+      const lock = EDIT.readonly ? `<span class="lock-note">🔒 ${labelize(AUD.status)} — locked for editing.</span>`
+        : (AUD.status === 'in_progress' ? '<span class="lock-note">🔒 In Progress — add products & edit counts; details locked.</span>' : '');
+      body.innerHTML = `
+        <div class="meta-grid">
+          <div><div class="k">Warehouse</div><div class="v">${warehouseName(STORE, AUD.warehouseId)}</div></div>
+          <div><div class="k">Entity</div><div class="v">${entityChip(AUD.entity)} ${entityName(STORE, AUD.entity)}</div></div>
+          <div><div class="k">Audit Date</div><div class="v">${AUD.auditDate || '—'}</div></div>
+          <div><div class="k">Assigned Auditor</div><div class="v">${userName(STORE, AUD.auditorUserId)}</div></div>
+          <div><div class="k">Created</div><div class="v">${fmtDateTime(AUD.createdAt)}</div></div>
+          <div><div class="k">Last Updated</div><div class="v">${fmtDateTime(AUD.updatedAt)}</div></div>
+        </div>
+        ${lock ? `<div style="margin-top:1rem">${lock}</div>` : ''}
+        ${EDIT.header ? '<div class="actions-row" style="justify-content:flex-start;margin-top:1rem"><button class="btn" id="editMetaBtn">Edit details</button></div>' : ''}
+        ${auditKpisHtml(AUD)}`;
+      const em = body.querySelector('#editMetaBtn'); if (em) em.addEventListener('click', () => editMetaModal(AUD));
+    }
+
+    function renderProducts(AUD, EDIT, body, foot, h) {
+      const rows = AUD.products || [];
+      body.innerHTML = `
+        ${EDIT.addProducts ? '<div class="actions-row" style="justify-content:flex-start;margin-bottom:.6rem"><button class="btn" id="addProductBtn">＋ Add Product</button></div>' : ''}
+        <div class="table-wrap"><table>
+          <thead><tr><th>Product</th><th>Batch</th><th>Location</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Variance</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rows.length ? rows.map((p) => { const c = computeRow(p); return `<tr class="clickable" data-pid="${p.productId}">
+            <td><strong>${p.name}</strong><div class="sub mono">${p.sku}</div></td><td class="mono">${p.batchNo}</td><td class="mono">${p.location}</td>
+            <td class="num mono">${fmtQty(p.expected)}</td><td class="num mono">${c.counted ? fmtQty(num(p.actual)) : '<span class="notice">—</span>'}</td>
+            <td class="num mono">${varianceCell(c.variance)}</td><td>${statusBadge(c.counted ? c.status : 'not_counted')}</td>
+            <td><button class="btn sm" data-pid="${p.productId}">${EDIT.readonly ? 'View' : 'Count'}</button></td></tr>`; }).join('')
+            : `<tr><td colspan="8" class="empty">No products yet.${EDIT.addProducts ? ' Use “Add Product”.' : ''}</td></tr>`}</tbody>
+        </table></div>`;
+      const open = (pid) => productModal(AUD, EDIT, pid, h);
+      wireClickableRows(body);
+      body.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button')) open(tr.dataset.pid); }));
+      body.querySelectorAll('button[data-pid]').forEach((b) => b.addEventListener('click', () => open(b.dataset.pid)));
+      const ap = body.querySelector('#addProductBtn'); if (ap) ap.addEventListener('click', () => addProductModal(AUD, h));
+      if (rows.length && (AUD.status === 'in_progress' || AUD.status === 'draft')) {
+        foot.innerHTML = '<button class="btn primary" id="toReview">Review &amp; Submit →</button>';
+        foot.querySelector('#toReview').addEventListener('click', () => h.showTab('review'));
+      }
+    }
+
+    function renderReview(AUD, EDIT, body, foot, h) {
+      const rows = AUD.products || [];
+      const t = auditTotals(AUD);
+      const notCounted = rows.filter((p) => !computeRow(p).counted);
+      const invalid = rows.filter((p) => !computeRow(p).valid);
+      const variItems = rows.filter(needsResolution);
+      const warn = [];
+      if (invalid.length) warn.push(`<span class="lock-note" style="color:var(--red);background:var(--red-bg)">⚠ ${invalid.length} balance break(s)</span>`);
+      if (notCounted.length) warn.push(`<span class="lock-note">⚠ ${notCounted.length} not counted</span>`);
+      if (variItems.length) warn.push(`<span class="lock-note" style="color:var(--blue-dark);background:var(--blue-bg)">ℹ ${variItems.length} variance item(s) → settlement</span>`);
+      body.innerHTML = `${auditKpisHtml(AUD)}
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.2rem 0 1rem">${warn.join('') || '<span class="lock-note" style="color:var(--green);background:var(--green-bg)">✓ Ready to submit</span>'}</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Product</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Missing</th><th class="num">Variance</th><th>Status</th><th>Evidence</th></tr></thead>
+          <tbody>${rows.map((p) => { const c = computeRow(p); return `<tr><td><strong>${p.name}</strong><div class="sub mono">${p.batchNo}</div></td>
+            <td class="num mono">${fmtQty(p.expected)}</td><td class="num mono">${c.counted ? fmtQty(num(p.actual)) : '—'}</td>
+            <td class="num mono">${c.missing === null ? '—' : (c.missing > 0 ? '<span class="neg">' + fmtQty(c.missing) + '</span>' : '0.000')}</td>
+            <td class="num mono">${varianceCell(c.variance)}</td><td>${statusBadge(c.counted ? c.status : 'not_counted')}${c.valid ? '' : ' <span class="neg">⚠</span>'}</td>
+            <td class="sub">${evidenceSummary(p.evidence)}</td></tr>`; }).join('')}</tbody>
+        </table></div>`;
+      if (!EDIT.readonly) {
+        foot.innerHTML = '<button class="btn primary" id="submitBtn">Submit Audit</button>';
+        foot.querySelector('#submitBtn').addEventListener('click', () => {
+          if (invalid.length) { toast(invalid.length + ' balance break(s) — fix first.'); return; }
+          const msg = notCounted.length ? `${notCounted.length} product(s) not counted. Submit anyway?` : 'Submit this audit for settlement?';
+          inlineConfirm(foot, { message: msg, confirmLabel: 'Submit', onCancel: () => renderReview(AUD, EDIT, body, foot, h), onConfirm: () => {
+            AUD.status = 'submitted'; AUD.submittedAt = nowIso(); AUD.updatedAt = nowIso(); saveStore(STORE);
+            toast('Audit submitted — now in the Settlement Queue.'); closeDrawer();
+          } });
+        });
+      }
+    }
+
+    /* ---------------- L3 modals ---------------- */
+    function productModal(AUD, EDIT, pid, h) {
+      const P = (AUD.products || []).find((x) => x.productId === pid); if (!P) return;
+      const ro = EDIT.readonly;
+      const fin = (f) => { const v = P[f]; return (v === null || v === undefined) ? '' : v; };
+      openModal(`${P.name}`,
+        `<div class="sub mono" style="margin:-.4rem 0 1rem">SKU: ${P.sku} · Batch: ${P.batchNo} · Location: ${P.location}</div>
+        <div class="form-grid">
+          <div class="field"><label>Expected (Base Unit)</label><input type="number" value="${P.expected}" disabled /></div>
+          <div class="field"><label>Actual (good)</label><input type="number" id="f_actual" min="0" step="0.001" value="${fin('actual')}" ${ro ? 'disabled' : ''} /></div>
+          <div class="field"><label>Expired</label><input type="number" id="f_expired" min="0" step="0.001" value="${fin('expired')}" ${ro ? 'disabled' : ''} /></div>
+          <div class="field"><label>Waste</label><input type="number" id="f_waste" min="0" step="0.001" value="${fin('waste')}" ${ro ? 'disabled' : ''} /></div>
+          <div class="field"><label>Extra</label><input type="number" id="f_extra" min="0" step="0.001" value="${fin('extra')}" ${ro ? 'disabled' : ''} /></div>
+        </div>
+        <div class="help">ⓘ Actual + Expired + Waste ≤ Expected + Extra. <span id="validNote"></span></div>
+        <div class="meta-grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin:1rem 0">
+          <div><div class="k">Missing</div><div class="v" id="dMiss">—</div></div>
+          <div><div class="k">Variance</div><div class="v" id="dVar">—</div></div>
+          <div><div class="k">Status</div><div class="v" id="dStat">—</div></div>
+          <div><div class="k">Class</div><div class="v" id="dClass">—</div></div>
+        </div>
+        <div class="field"><label>Reason / notes</label><textarea id="reason" ${ro ? 'disabled' : ''}>${P.reasonNarrative || ''}</textarea></div>
+        <div style="margin-top:.8rem"><div class="k" style="font-size:.76rem;color:var(--muted);font-weight:600;text-transform:uppercase">Evidence</div><div class="evidence" id="evidence" style="margin-top:.4rem"></div>
+          ${ro ? '' : '<div class="actions-row" style="justify-content:flex-start;margin-top:.5rem"><button class="btn sm" id="addPhoto">📷 Add photo</button><button class="btn sm" id="addDoc">📄 Add document</button></div>'}</div>`,
+        ro ? `<button class="btn primary" id="pClose">Close</button>`
+          : `<button class="btn ghost" id="pClose">Cancel</button><button class="btn" id="pSave">Save</button><button class="btn primary" id="pNext">Save &amp; Next</button>`);
+
+      const derive = () => {
+        if (!ro) {
+          const g = (f) => { const el = document.getElementById('f_' + f); return el.value === '' ? null : Number(el.value); };
+          P.actual = g('actual');
+          if (P.actual === null) { P.expired = null; P.waste = null; P.extra = null; }
+          else { P.expired = g('expired') || 0; P.waste = g('waste') || 0; P.extra = g('extra') || 0; }
+          P.reasonNarrative = document.getElementById('reason').value.trim();
+        }
+        const c = computeRow(P);
+        document.getElementById('dMiss').innerHTML = c.missing === null ? '—' : (c.missing > 0 ? '<span class="neg">' + fmtQty(c.missing) + '</span>' : '0.000');
+        document.getElementById('dVar').innerHTML = varianceCell(c.variance);
+        document.getElementById('dStat').innerHTML = statusBadge(c.counted ? c.status : 'not_counted');
+        document.getElementById('dClass').innerHTML = c.counted && c.variance !== 0 ? `<span class="badge st-under_review">${classify(P)}</span>` : '<span class="notice">—</span>';
+        document.getElementById('validNote').innerHTML = c.valid ? '' : '<span class="neg">Balance rule violated.</span>';
+      };
+      const renderEv = () => {
+        const ev = P.evidence || { photos: [], documents: [] };
+        const chips = [].concat((ev.photos || []).map((x) => `<span class="ev-chip">📷 ${x.caption || 'Photo'}</span>`), (ev.documents || []).map((x) => `<span class="ev-chip">📄 ${x.name || 'Doc'}</span>`));
+        document.getElementById('evidence').innerHTML = chips.length ? chips.join('') : '<span class="notice">No evidence.</span>';
+      };
+      derive(); renderEv();
+      document.getElementById('pClose').addEventListener('click', closeModal);
+      if (!ro) {
+        ['actual', 'expired', 'waste', 'extra'].forEach((f) => document.getElementById('f_' + f).addEventListener('input', derive));
+        const save = (next) => {
+          derive(); if (!computeRow(P).valid) { toast('Balance rule violated.'); return; }
+          AUD.updatedAt = nowIso(); saveStore(STORE); closeModal();
+          h.showTab('products');
+          toast('Saved.');
+          if (next) { const rest = AUD.products.filter((x) => x.productId !== pid && !computeRow(x).counted); if (rest.length) productModal(AUD, EDIT, rest[0].productId, h); }
+        };
+        document.getElementById('pSave').addEventListener('click', () => save(false));
+        document.getElementById('pNext').addEventListener('click', () => save(true));
+        document.getElementById('addPhoto').addEventListener('click', () => { P.evidence = P.evidence || { photos: [], documents: [] }; (P.evidence.photos = P.evidence.photos || []).push({ caption: 'Photo ' + (P.evidence.photos.length + 1) }); renderEv(); });
+        document.getElementById('addDoc').addEventListener('click', () => { P.evidence = P.evidence || { photos: [], documents: [] }; (P.evidence.documents = P.evidence.documents || []).push({ name: 'document-' + (P.evidence.documents.length + 1) + '.pdf' }); renderEv(); });
+      }
+    }
+
+    function addProductModal(AUD, h) {
+      openModal('Add Product',
+        `<div class="form-grid">
+          <div class="field full"><label>Product name <span class="req">*</span></label><input type="text" id="apName" placeholder="e.g. Milk Pouch 500ml" /></div>
+          <div class="field"><label>SKU</label><input type="text" id="apSku" /></div>
+          <div class="field"><label>Batch No.</label><input type="text" id="apBatch" /></div>
+          <div class="field"><label>Location</label><input type="text" id="apLoc" /></div>
+          <div class="field"><label>Expected (Base Unit)</label><input type="number" id="apExp" min="0" step="0.001" value="0" /></div>
+        </div>`,
+        `<button class="btn ghost" id="apCancel">Cancel</button><button class="btn primary" id="apSave">Add Product</button>`);
+      document.getElementById('apCancel').addEventListener('click', closeModal);
+      document.getElementById('apSave').addEventListener('click', () => {
+        const name = document.getElementById('apName').value.trim(); if (!name) { toast('Product name is required.'); return; }
+        AUD.products = AUD.products || [];
+        AUD.products.push({ productId: 'NP-' + AUD.id.slice(-3) + '-' + (AUD.products.length + 1), name,
+          sku: document.getElementById('apSku').value.trim() || '—', batchNo: document.getElementById('apBatch').value.trim() || '—',
+          location: document.getElementById('apLoc').value.trim() || '—', expected: Number(document.getElementById('apExp').value) || 0,
+          actual: null, expired: null, waste: null, extra: null });
+        if (AUD.status === 'draft') AUD.status = 'in_progress';
+        AUD.updatedAt = nowIso(); saveStore(STORE); closeModal(); toast('Product added.'); h.showTab('products');
+      });
+    }
+
+    function editMetaModal(AUD) {
+      const opt = (list, sel, vk, lk) => list.map((i) => `<option value="${i[vk]}" ${i[vk] === sel ? 'selected' : ''}>${i[lk]}</option>`).join('');
+      openModal('Edit Audit Details',
+        `<div class="form-grid">
+          <div class="field full"><label>Audit name</label><input type="text" id="emName" value="${AUD.name.replace(/"/g, '&quot;')}" /></div>
+          <div class="field"><label>Warehouse</label><select id="emWh">${opt(STORE.warehouses, AUD.warehouseId, 'id', 'name')}</select></div>
+          <div class="field"><label>Entity</label><select id="emEnt">${opt(STORE.entities, AUD.entity, 'id', 'name')}</select></div>
+          <div class="field"><label>Assigned Auditor</label><select id="emAud">${opt(STORE.users.filter((u) => u.role === 'Auditor'), AUD.auditorUserId, 'id', 'name')}</select></div>
+          <div class="field"><label>Audit date</label><input type="text" id="emDate" value="${AUD.auditDate || ''}" placeholder="2024-05-30" /></div>
+        </div>`,
+        `<button class="btn ghost" id="emCancel">Cancel</button><button class="btn primary" id="emSave">Save</button>`);
+      document.getElementById('emCancel').addEventListener('click', closeModal);
+      document.getElementById('emSave').addEventListener('click', () => {
+        AUD.name = document.getElementById('emName').value.trim() || AUD.name;
+        AUD.warehouseId = document.getElementById('emWh').value; AUD.entity = document.getElementById('emEnt').value;
+        AUD.auditorUserId = document.getElementById('emAud').value; AUD.auditDate = document.getElementById('emDate').value.trim();
+        AUD.updatedAt = nowIso(); saveStore(STORE); closeModal(); toast('Details updated.');
+        openAuditDrawer(AUD.id, 'overview');
+      });
+    }
 
     function createAudit() {
       const seqs = STORE.audits.map((a) => { const m = /AUD-2405-(\d+)/.exec(a.id); return m ? Number(m[1]) : 0; });
       const nextId = 'AUD-2405-' + String(Math.max(0, ...seqs) + 1).padStart(3, '0');
-      const whOpts = STORE.warehouses.map((w) => `<option value="${w.id}">${w.name}</option>`).join('');
-      const entOpts = STORE.entities.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
-      const audOpts = STORE.users.filter((u) => u.role === 'Auditor').map((u) => `<option value="${u.id}">${u.name}</option>`).join('');
+      const opt = (list, vk, lk) => list.map((i) => `<option value="${i[vk]}">${i[lk]}</option>`).join('');
       openModal('Create Audit',
         `<div class="form-grid">
           <div class="field full"><label>Audit name <span class="req">*</span></label><input type="text" id="caName" value="Stock Audit — ${nextId}" /></div>
-          <div class="field"><label>Warehouse</label><select id="caWh">${whOpts}</select></div>
-          <div class="field"><label>Entity</label><select id="caEnt">${entOpts}</select></div>
-          <div class="field"><label>Assign auditor <span class="req">*</span></label><select id="caAud">${audOpts}</select></div>
+          <div class="field"><label>Warehouse</label><select id="caWh">${opt(STORE.warehouses, 'id', 'name')}</select></div>
+          <div class="field"><label>Entity</label><select id="caEnt">${opt(STORE.entities, 'id', 'name')}</select></div>
+          <div class="field"><label>Assign auditor <span class="req">*</span></label><select id="caAud">${opt(STORE.users.filter((u) => u.role === 'Auditor'), 'id', 'name')}</select></div>
           <div class="field"><label>Audit date</label><input type="text" id="caDate" placeholder="2024-05-31" /></div>
-        </div><p class="help">New audits start as <strong>Draft</strong>. Add products from the audit detail page to begin counting.</p>`,
+        </div><p class="help">New audits start as <strong>Draft</strong>. Add products from the audit drawer to begin counting.</p>`,
         `<button class="btn ghost" id="caCancel">Cancel</button><button class="btn primary" id="caSave">Create &amp; Assign</button>`);
       document.getElementById('caCancel').addEventListener('click', closeModal);
       document.getElementById('caSave').addEventListener('click', () => {
-        const name = document.getElementById('caName').value.trim();
-        if (!name) { toast('Audit name is required.'); return; }
-        STORE.audits.unshift({
-          id: nextId, name, warehouseId: document.getElementById('caWh').value, entity: document.getElementById('caEnt').value,
+        const name = document.getElementById('caName').value.trim(); if (!name) { toast('Audit name is required.'); return; }
+        STORE.audits.unshift({ id: nextId, name, warehouseId: document.getElementById('caWh').value, entity: document.getElementById('caEnt').value,
           auditorUserId: document.getElementById('caAud').value, status: 'draft', createdAt: nowIso(), updatedAt: nowIso(),
-          submittedAt: null, auditDate: document.getElementById('caDate').value.trim(), progress: 0, countedTotal: 0, productTotal: 0, products: [],
-        });
-        saveStore(STORE);
-        closeModal();
-        state.status = 'all'; state.page = 1; document.getElementById('fStatus').value = '';
-        renderAll();
-        toast('Audit ' + nextId + ' created & assigned.');
+          submittedAt: null, auditDate: document.getElementById('caDate').value.trim(), progress: 0, countedTotal: 0, productTotal: 0, products: [] });
+        saveStore(STORE); closeModal(); state.status = 'all'; state.page = 1; document.getElementById('fStatus').value = '';
+        renderAll(); toast('Audit ' + nextId + ' created & assigned.'); openAuditDrawer(nextId, 'overview');
       });
     }
 
@@ -195,32 +359,18 @@
       STORE = s;
       document.getElementById('content').innerHTML = skeleton();
       renderShell('audit-sessions', { user: s.currentUser, crumbTitle: 'Audit Sessions' });
-
       fillSelect(document.getElementById('fWarehouse'), s.warehouses, 'All Warehouses', 'id', 'name');
-      const statusEl = document.getElementById('fStatus');
-      statusEl.innerHTML = '<option value="">All Statuses</option>' +
-        STATUS_TABS.filter((x) => x !== 'all').map((x) => `<option value="${x}">${labelize(x)}</option>`).join('');
+      document.getElementById('fStatus').innerHTML = '<option value="">All Statuses</option>' + STATUS_TABS.filter((x) => x !== 'all').map((x) => `<option value="${x}">${labelize(x)}</option>`).join('');
       fillSelect(document.getElementById('fEntity'), s.entities, 'All (FG, RM, Asset)', 'id', 'name');
       fillSelect(document.getElementById('fAuditor'), s.users.filter((u) => u.role === 'Auditor'), 'All Auditors', 'id', 'name');
-
-      const apply = () => {
-        state.warehouse = document.getElementById('fWarehouse').value;
-        state.entity = document.getElementById('fEntity').value;
-        state.status = document.getElementById('fStatus').value || 'all';
-        state.auditor = document.getElementById('fAuditor').value;
-        state.page = 1;
-        renderAll();
-      };
+      const apply = () => { state.warehouse = document.getElementById('fWarehouse').value; state.entity = document.getElementById('fEntity').value; state.status = document.getElementById('fStatus').value || 'all'; state.auditor = document.getElementById('fAuditor').value; state.page = 1; renderAll(); };
       document.getElementById('applyBtn').addEventListener('click', apply);
-      document.getElementById('clearBtn').addEventListener('click', () => {
-        ['fWarehouse', 'fEntity', 'fStatus', 'fAuditor', 'fSearch'].forEach((id) => document.getElementById(id).value = '');
-        Object.assign(state, { warehouse: '', entity: '', status: 'all', auditor: '', q: '', page: 1 });
-        renderAll();
-      });
+      document.getElementById('clearBtn').addEventListener('click', () => { ['fWarehouse', 'fEntity', 'fStatus', 'fAuditor', 'fSearch'].forEach((id) => document.getElementById(id).value = ''); Object.assign(state, { warehouse: '', entity: '', status: 'all', auditor: '', q: '', page: 1 }); renderAll(); });
       document.getElementById('fSearch').addEventListener('input', (e) => { state.q = e.target.value; state.page = 1; renderAll(); });
       document.getElementById('createBtn').addEventListener('click', createAudit);
-
       renderAll();
+      const openId = openParam();
+      if (openId && byId(STORE.audits, openId)) openAuditDrawer(openId, qp('tab', 'overview'), qp('product', '') || null);
     });
   </script>
 </body>

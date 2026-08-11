@@ -1,15 +1,6 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Redirecting…</title>
-  <script>
-    // The counting grid was replaced by the Audit Detail → Product Detail flow in this iteration.
-    // Preserve any ?id= param and forward to the new detail page.
-    var id = new URLSearchParams(location.search).get('id') || '';
-    location.replace('audit-detail.html' + (id ? '?id=' + encodeURIComponent(id) : ''));
-  </script>
-</head>
-<body></body>
-</html>
+<html lang="en"><head><meta charset="UTF-8" /><title>Redirecting…</title><script>
+  // The counting grid was replaced by the Audit drawer (opened from Audit Sessions).
+  var id = new URLSearchParams(location.search).get('id') || '';
+  location.replace('audit-sessions.html' + (id ? '?open=' + encodeURIComponent(id) : ''));
+</script></head><body></body></html>

@@ -154,7 +154,7 @@
       const pct = (a) => (a.products && a.products.length) ? auditTotals(a).pct : (a.progress || 0);
       document.getElementById('recentAudits').innerHTML = rows.map((a) => `
         <tr class="clickable" data-id="${a.id}">
-          <td class="mono"><a class="strong-link" href="audit-detail.html?id=${a.id}">${a.id}</a></td>
+          <td class="mono"><a class="strong-link" href="audit-sessions.html?open=${a.id}">${a.id}</a></td>
           <td>${warehouseName(STORE, a.warehouseId)}</td>
           <td>${entityChip(a.entity)}</td>
           <td>${userName(STORE, a.auditorUserId)}</td>
@@ -165,7 +165,7 @@
       const tbody = document.getElementById('recentAudits');
       wireClickableRows(tbody);
       tbody.querySelectorAll('tr.clickable').forEach((tr) =>
-        tr.addEventListener('click', (e) => { if (!e.target.closest('a')) location.href = 'audit-detail.html?id=' + tr.dataset.id; }));
+        tr.addEventListener('click', (e) => { if (!e.target.closest('a')) location.href = 'audit-sessions.html?open=' + tr.dataset.id; }));
     }
 
     function renderPendingSettlements() {
@@ -174,7 +174,7 @@
       document.getElementById('pendingSettlements').innerHTML = rows.map((s) => `
         <tr>
           <td class="mono strong-link">${s.id}</td>
-          <td class="mono"><a href="settlement-detail.html?id=${s.auditId}">${s.auditId}</a></td>
+          <td class="mono"><a href="settlement.html?open=${s.auditId}">${s.auditId}</a></td>
           <td>${warehouseName(STORE, s.warehouseId)}</td>
           <td>${entityChip(s.entity)}</td>
           <td class="mono">${fmtDateTime(s.submittedAt)}</td>

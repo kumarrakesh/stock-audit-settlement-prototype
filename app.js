@@ -264,3 +264,60 @@ function closeModal() {
   if (m) m.remove();
   document.removeEventListener('keydown', escClose);
 }
+
+/* ---------- L2 drawer (right slide-in, with tabs) --------------------------
+   opts: { title, subtitle, tabs:[{key,label}], active, render(key, bodyEl, footEl), onClose }
+   Returns a handle: { scrim, bodyEl, footEl, showTab(key), refresh() }. */
+function openDrawer(opts) {
+  closeDrawer();
+  const scrim = document.createElement('div');
+  scrim.className = 'drawer-scrim'; scrim.id = 'drawerScrim';
+  const tabsHtml = (opts.tabs || []).map((t) => `<button class="drawer-tab" data-key="${t.key}">${t.label}</button>`).join('');
+  scrim.innerHTML = `<div class="drawer" role="dialog" aria-modal="true" aria-label="${opts.title || ''}">
+    <div class="drawer-header"><div><h2>${opts.title || ''}</h2>${opts.subtitle ? `<div class="sub">${opts.subtitle}</div>` : ''}</div>
+      <button class="drawer-close" aria-label="Close">×</button></div>
+    ${(opts.tabs && opts.tabs.length) ? `<div class="drawer-tabs">${tabsHtml}</div>` : ''}
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-foot" id="drawerFoot"></div></div>`;
+  document.body.appendChild(scrim);
+  const raf = (typeof window !== 'undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : (fn) => setTimeout(fn, 0);
+  raf(() => scrim.classList.add('open'));
+  const bodyEl = scrim.querySelector('#drawerBody');
+  const footEl = scrim.querySelector('#drawerFoot');
+  let active = opts.active || (opts.tabs && opts.tabs[0] && opts.tabs[0].key);
+  function showTab(key) {
+    active = key;
+    scrim.querySelectorAll('.drawer-tab').forEach((b) => b.classList.toggle('active', b.dataset.key === key));
+    if (opts.render) opts.render(key, bodyEl, footEl);
+  }
+  scrim.querySelectorAll('.drawer-tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.key)));
+  scrim.querySelector('.drawer-close').addEventListener('click', closeDrawer);
+  scrim.addEventListener('click', (e) => { if (e.target === scrim) closeDrawer(); });
+  document.addEventListener('keydown', drawerEsc);
+  const handle = { scrim, bodyEl, footEl, showTab, refresh: () => showTab(active), get active() { return active; } };
+  window._drawerOnClose = opts.onClose || null;
+  // NB: caller must invoke handle.refresh() to run the first render — deferring it here
+  // avoids a temporal-dead-zone on `const h = openDrawer({...})` when a render callback uses `h`.
+  return handle;
+}
+function drawerEsc(e) { if (e.key === 'Escape') closeDrawer(); }
+function closeDrawer() {
+  const d = document.getElementById('drawerScrim');
+  if (d) d.remove();
+  document.removeEventListener('keydown', drawerEsc);
+  const cb = window._drawerOnClose; window._drawerOnClose = null;
+  if (cb) cb();
+}
+
+/* Inline confirmation (replaces confirm dialogs). Renders into a target element
+   (typically the drawer footer). onCancel should restore the prior footer. */
+function inlineConfirm(targetEl, o) {
+  targetEl.innerHTML = `<div class="inline-confirm"><span>⚠ ${o.message}</span>
+    <span class="ic-actions"><button class="btn sm" id="icCancel">Cancel</button>
+    <button class="btn sm ${o.danger ? 'danger' : 'primary'}" id="icOk">${o.confirmLabel || 'Confirm'}</button></span></div>`;
+  targetEl.querySelector('#icCancel').addEventListener('click', () => { if (o.onCancel) o.onCancel(); });
+  targetEl.querySelector('#icOk').addEventListener('click', () => o.onConfirm());
+}
+
+// Auto-open a drawer from ?open=<id> on list pages.
+function openParam() { return qp('open', ''); }

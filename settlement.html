@@ -14,20 +14,16 @@
     let STORE = null;
     const st = { tab: 'pending', warehouse: '', entity: '', q: '' };
     const PENDING = ['submitted', 'under_review'];
-    const SETTLED = ['approved', 'closed'];
+    const SETTLED_ST = ['approved', 'closed'];
 
     function skeleton() {
       return `
-        <div class="page-head">
-          <div><h1>Settlement Queue</h1><div class="sub">Completed stock audits awaiting settlement</div></div>
-        </div>
-        <section class="filters">
-          <div class="filter-actions">
-            <div class="field" style="min-width:170px"><label>Warehouse</label><select id="fWh"></select></div>
-            <div class="field" style="min-width:170px"><label>Entity</label><select id="fEnt"></select></div>
-            <div class="search-wrap grow" style="align-self:flex-end">${svg('search')}<input type="search" id="fSearch" placeholder="Search by Audit ID / name / auditor..." /></div>
-          </div>
-        </section>
+        <div class="page-head"><div><h1>Settlement Queue</h1><div class="sub">Completed stock audits awaiting settlement</div></div></div>
+        <section class="filters"><div class="filter-actions">
+          <div class="field" style="min-width:170px"><label>Warehouse</label><select id="fWh"></select></div>
+          <div class="field" style="min-width:170px"><label>Entity</label><select id="fEnt"></select></div>
+          <div class="search-wrap grow" style="align-self:flex-end">${svg('search')}<input type="search" id="fSearch" placeholder="Search by Audit ID / name / auditor..." /></div>
+        </div></section>
         <section class="panel">
           <div class="tabs" id="tabs"></div>
           <div class="table-wrap"><table>
@@ -37,10 +33,9 @@
         </section>`;
     }
 
-    function auditVarianceItems(a) { return (a.products || []).filter(needsResolution).length; }
-
+    const varianceItems = (a) => (a.products || []).filter(needsResolution);
     function base() {
-      const inTab = (a) => st.tab === 'pending' ? PENDING.includes(a.status) : SETTLED.includes(a.status);
+      const inTab = (a) => (st.tab === 'pending' ? PENDING : SETTLED_ST).includes(a.status);
       return STORE.audits.filter((a) => {
         if (!inTab(a)) return false;
         if (st.warehouse && a.warehouseId !== st.warehouse) return false;
@@ -49,38 +44,122 @@
         return true;
       });
     }
-
     function renderTabs() {
-      const count = (tab) => STORE.audits.filter((a) => (tab === 'pending' ? PENDING : SETTLED).includes(a.status)).length;
-      document.getElementById('tabs').innerHTML = ['pending', 'settled'].map((t) => `
-        <button class="tab${st.tab === t ? ' active' : ''}" data-tab="${t}">${t === 'pending' ? 'To Settle' : 'Settled'}<span class="count">${count(t)}</span></button>`).join('');
+      const count = (tab) => STORE.audits.filter((a) => (tab === 'pending' ? PENDING : SETTLED_ST).includes(a.status)).length;
+      document.getElementById('tabs').innerHTML = ['pending', 'settled'].map((t) => `<button class="tab${st.tab === t ? ' active' : ''}" data-tab="${t}">${t === 'pending' ? 'To Settle' : 'Settled'}<span class="count">${count(t)}</span></button>`).join('');
       document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => { st.tab = b.dataset.tab; renderTabs(); renderRows(); }));
     }
-
     function renderRows() {
-      const list = base();
-      const tbody = document.getElementById('rows');
+      const list = base(); const tbody = document.getElementById('rows');
       if (!list.length) { tbody.innerHTML = `<tr><td colspan="10" class="empty">No audits in this view.</td></tr>`; return; }
-      tbody.innerHTML = list.map((a) => {
-        const t = auditTotals(a);
-        const items = auditVarianceItems(a);
+      tbody.innerHTML = list.map((a) => { const t = auditTotals(a); const items = varianceItems(a).length;
         return `<tr class="clickable" data-id="${a.id}">
-          <td class="mono"><a class="strong-link" href="settlement-detail.html?id=${a.id}">${a.id}</a></td>
-          <td>${a.name}</td>
-          <td>${warehouseName(STORE, a.warehouseId)}</td>
-          <td>${entityChip(a.entity)}</td>
-          <td>${userName(STORE, a.auditorUserId)}</td>
-          <td class="mono">${fmtDateTime(a.submittedAt)}</td>
+          <td class="mono"><span class="strong-link">${a.id}</span></td><td>${a.name}</td><td>${warehouseName(STORE, a.warehouseId)}</td>
+          <td>${entityChip(a.entity)}</td><td>${userName(STORE, a.auditorUserId)}</td><td class="mono">${fmtDateTime(a.submittedAt)}</td>
           <td class="num mono">${(a.products && a.products.length) ? items : '<span class="notice">—</span>'}</td>
           <td class="num mono">${(a.products && a.products.length) ? varianceCell(t.variance) : '<span class="notice">—</span>'}</td>
-          <td>${statusBadge(a.status)}</td>
-          <td><button class="btn sm" data-id="${a.id}">${st.tab === 'pending' ? 'Settle' : 'View'}</button></td>
-        </tr>`;
+          <td>${statusBadge(a.status)}</td><td><button class="btn sm" data-id="${a.id}">${st.tab === 'pending' ? 'Settle' : 'View'}</button></td></tr>`;
       }).join('');
-      const go = (id) => location.href = 'settlement-detail.html?id=' + id;
       wireClickableRows(tbody);
-      tbody.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button') && !e.target.closest('a')) go(tr.dataset.id); }));
-      tbody.querySelectorAll('button[data-id]').forEach((b) => b.addEventListener('click', () => go(b.dataset.id)));
+      tbody.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button')) openSettlementDrawer(tr.dataset.id); }));
+      tbody.querySelectorAll('button[data-id]').forEach((b) => b.addEventListener('click', () => openSettlementDrawer(b.dataset.id)));
+    }
+
+    /* ---------------- L2 drawer: settle an audit ---------------- */
+    function openSettlementDrawer(id) {
+      const AUD = byId(STORE.audits, id); if (!AUD) return;
+      const settled = SETTLED_ST.includes(AUD.status);
+      const h = openDrawer({
+        title: `Settle: ${AUD.name}`, subtitle: `${AUD.id} · ${warehouseName(STORE, AUD.warehouseId)} · ${statusBadge(AUD.status)}`,
+        tabs: [{ key: 'items', label: 'Variance Items' }, { key: 'summary', label: 'Summary' }], active: 'items', onClose: () => { renderTabs(); renderRows(); },
+        render(key, body, foot) {
+          foot.innerHTML = '';
+          if (key === 'summary') { body.innerHTML = summaryHtml(AUD); return; }
+          renderItems(AUD, settled, body, foot, h);
+        },
+      });
+      h.refresh();
+      return h;
+    }
+
+    function summaryHtml(AUD) {
+      const t = auditTotals(AUD);
+      const kpi = (tile, icon, label, value) => `<div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div><div class="value">${value}</div></div>`;
+      return `<div class="kpi-row">${
+        kpi('orange', 'chart', 'Net Variance', `<span class="${t.variance < 0 ? 'neg' : t.variance > 0 ? 'pos' : 'zero'}">${fmtQty(t.variance)}</span>`) +
+        kpi('red', 'list', 'Missing', `<span class="neg">${fmtQty(t.missing)}</span>`) + kpi('green', 'plus', 'Extra', `<span class="pos">${fmtQty(t.extra)}</span>`) +
+        kpi('blue', 'box', 'Items to Resolve', varianceItems(AUD).length)}</div>
+        <p class="help">A stock snapshot runs in the <strong>background</strong> after settlement completes — not shown here.</p>`;
+    }
+
+    function resLineHtml(AUD, p, settled) {
+      const c = computeRow(p), cls = classify(p), opts = resolutionOptionsFor(STORE, cls), r = p.resolution || {};
+      const selId = r.optionId || (opts[0] && opts[0].id), sel = resolutionOption(STORE, cls, selId) || {}, resolved = r.status === 'resolved';
+      const controls = settled ? `<div class="help">Resolution: <strong>${(resolutionOption(STORE, cls, r.optionId) || {}).label || '—'}</strong>${r.note ? ' · ' + r.note : ''}</div>` : `
+        <div class="res-controls">
+          <div class="field"><label>Resolution</label><select class="resSel" data-pid="${p.productId}">${opts.map((o) => `<option value="${o.id}" ${o.id === selId ? 'selected' : ''}>${o.label}</option>`).join('')}</select></div>
+          <div class="split-fields ${sel.split ? 'on' : ''}" data-pid="${p.productId}"><div class="field"><label>Recover qty</label><input type="number" class="resRecover" min="0" step="0.001" value="${r.recoveredQty || ''}" /></div><div class="field"><label>Write-off qty</label><input type="number" class="resWrite" min="0" step="0.001" value="${r.writeOffQty || ''}" /></div></div>
+          <div class="field grow" style="min-width:200px"><label>Note</label><input type="text" class="resNote" value="${(r.note || '').replace(/"/g, '&quot;')}" placeholder="optional" /></div>
+        </div>
+        <div class="actions-row" style="justify-content:flex-start"><button class="btn sm ticketBtn" data-pid="${p.productId}" ${sel.ticket ? '' : 'style="display:none"'}>${r.ticketId ? 'Ticket ' + r.ticketId + ' ✓' : '＋ Create Recovery Ticket'}</button><button class="btn sm keepBtn" data-pid="${p.productId}">Keep Pending</button><button class="btn sm primary resolveBtn" data-pid="${p.productId}">Resolve</button></div>`;
+      return `<div class="res-line ${resolved ? 'resolved' : ''}" id="line-${p.productId}">
+        <div class="rl-head"><div><strong>${p.name}</strong> <span class="sub mono">· ${p.batchNo} · ${p.location}</span><div style="margin-top:.3rem"><span class="badge st-under_review">${cls}</span></div></div>
+          <div>${resolved ? statusBadge('resolved') : statusBadge('pending_review')}${r.ticketId ? ' <span class="mono ticketLink" data-tid="' + r.ticketId + '" style="cursor:pointer;color:var(--blue)">' + r.ticketId + '</span>' : ''}</div></div>
+        <div class="rl-nums"><span class="n">Expected <b>${fmtQty(p.expected)}</b></span><span class="n">Actual <b>${fmtQty(num(p.actual))}</b></span><span class="n">Missing <b>${fmtQty(c.missing || 0)}</b></span><span class="n">Extra <b>${fmtQty(num(p.extra))}</b></span><span class="n">Variance <b>${(c.variance < 0 ? '' : '+') + fmtQty(c.variance)}</b></span></div>
+        ${p.reasonNarrative ? `<div class="reason">${p.reasonNarrative}</div>` : ''}
+        <div class="evidence">${(p.evidence && ((p.evidence.photos || []).length + (p.evidence.documents || []).length)) ? [].concat((p.evidence.photos || []).map((x) => `<span class="ev-chip">📷 ${x.caption || 'Photo'}</span>`), (p.evidence.documents || []).map((x) => `<span class="ev-chip">📄 ${x.name}</span>`)).join('') : '<span class="notice">No evidence</span>'}</div>
+        ${controls}</div>`;
+    }
+
+    function renderItems(AUD, settled, body, foot, h) {
+      const items = varianceItems(AUD);
+      if (!(AUD.products && AUD.products.length)) { body.innerHTML = '<div class="empty">No variance line items are seeded for this audit in the prototype.</div>'; return; }
+      if (!items.length) { body.innerHTML = '<div class="empty">✓ This audit balances — no variance items to resolve.</div>'; }
+      else body.innerHTML = items.map((p) => resLineHtml(AUD, p, settled)).join('');
+
+      if (!settled) {
+        body.querySelectorAll('.resSel').forEach((sel) => sel.addEventListener('change', () => {
+          const pid = sel.dataset.pid, p = AUD.products.find((x) => x.productId === pid), opt = resolutionOption(STORE, classify(p), sel.value) || {};
+          body.querySelector(`.split-fields[data-pid="${pid}"]`).classList.toggle('on', !!opt.split);
+          body.querySelector(`.ticketBtn[data-pid="${pid}"]`).style.display = opt.ticket ? '' : 'none';
+        }));
+        const readLine = (pid) => { const line = document.getElementById('line-' + pid), sel = line.querySelector('.resSel');
+          return { optionId: sel.value, recoveredQty: Number(line.querySelector('.resRecover') ? line.querySelector('.resRecover').value : 0) || 0, writeOffQty: Number(line.querySelector('.resWrite') ? line.querySelector('.resWrite').value : 0) || 0, note: (line.querySelector('.resNote') || {}).value || '' }; };
+        const setRes = (pid, status) => { const p = AUD.products.find((x) => x.productId === pid); p.resolution = Object.assign({}, p.resolution, readLine(pid), { status }); AUD.updatedAt = nowIso(); saveStore(STORE); renderItems(AUD, settled, body, foot, h); toast(status === 'resolved' ? 'Item resolved.' : 'Item kept pending.'); };
+        body.querySelectorAll('.resolveBtn').forEach((b) => b.addEventListener('click', () => setRes(b.dataset.pid, 'resolved')));
+        body.querySelectorAll('.keepBtn').forEach((b) => b.addEventListener('click', () => setRes(b.dataset.pid, 'pending')));
+        body.querySelectorAll('.ticketBtn').forEach((b) => b.addEventListener('click', () => {
+          const pid = b.dataset.pid, p = AUD.products.find((x) => x.productId === pid);
+          p.resolution = Object.assign({}, p.resolution, readLine(pid));
+          if (p.resolution.ticketId) { location.href = 'tickets.html?open=' + p.resolution.ticketId; return; }
+          const opt = resolutionOption(STORE, classify(p), p.resolution.optionId) || {};
+          const id = nextSeqId(STORE.actionTickets, 'AT-2405-');
+          STORE.actionTickets.unshift({ id, auditId: AUD.id, productId: pid, warehouseId: AUD.warehouseId, entity: AUD.entity, title: `${opt.label || 'Recovery'} — ${p.name}`, description: `Auto-created from settlement of ${AUD.id}. ${classify(p)} on ${p.name} (${p.batchNo}). ${p.reasonNarrative || ''}`.trim(), status: 'open', priority: classify(p) === 'MISSING' ? 'high' : 'medium', assignedToUserId: AUD.auditorUserId, createdByUserId: STORE.currentUser.id, createdAt: nowIso(), comments: [] });
+          p.resolution.ticketId = id; AUD.updatedAt = nowIso(); saveStore(STORE); renderItems(AUD, settled, body, foot, h); toast('Recovery ticket ' + id + ' created & assigned.');
+        }));
+        body.querySelectorAll('.ticketLink').forEach((el) => el.addEventListener('click', () => location.href = 'tickets.html?open=' + el.dataset.tid));
+
+        // footer: Settle (inline confirm) + keep in settlement
+        const renderFoot = () => {
+          foot.innerHTML = '<button class="btn" id="keepAllBtn">Keep in Settlement</button><button class="btn primary" id="settleBtn">Settle Audit</button>';
+          foot.querySelector('#keepAllBtn').addEventListener('click', () => { if (AUD.status === 'submitted') { AUD.status = 'under_review'; AUD.updatedAt = nowIso(); saveStore(STORE); } toast('Kept in settlement.'); closeDrawer(); });
+          foot.querySelector('#settleBtn').addEventListener('click', () => {
+            const unaddressed = items.filter((p) => !(p.resolution && p.resolution.optionId));
+            if (unaddressed.length) { toast(`Choose a resolution for all items first (${unaddressed.length} left).`); return; }
+            const pending = items.filter((p) => (p.resolution || {}).status !== 'resolved');
+            const msg = pending.length ? `${pending.length} item(s) not marked resolved. Settle anyway?` : 'Settle this audit? Recovery items become tickets.';
+            inlineConfirm(foot, { message: msg, confirmLabel: 'Settle', onCancel: renderFoot, onConfirm: () => {
+              let made = 0;
+              items.forEach((p) => { const opt = resolutionOption(STORE, classify(p), p.resolution.optionId) || {};
+                if (opt.ticket && !p.resolution.ticketId) { const id = nextSeqId(STORE.actionTickets, 'AT-2405-'); STORE.actionTickets.unshift({ id, auditId: AUD.id, productId: p.productId, warehouseId: AUD.warehouseId, entity: AUD.entity, title: `${opt.label} — ${p.name}`, description: `Auto-created on settle of ${AUD.id}. ${classify(p)} on ${p.name}.`, status: 'open', priority: classify(p) === 'MISSING' ? 'high' : 'medium', assignedToUserId: AUD.auditorUserId, createdByUserId: STORE.currentUser.id, createdAt: nowIso(), comments: [] }); p.resolution.ticketId = id; made++; }
+                if ((p.resolution || {}).status !== 'resolved') p.resolution.status = 'resolved'; });
+              AUD.status = 'approved'; AUD.updatedAt = nowIso(); saveStore(STORE);
+              toast(`Settled${made ? ' — ' + made + ' recovery ticket(s) created' : ''}. Snapshot runs in background.`); closeDrawer();
+            } });
+          });
+        };
+        renderFoot();
+      }
     }
 
     loadStore().then((s) => {
@@ -93,6 +172,8 @@
       document.getElementById('fEnt').addEventListener('change', (e) => { st.entity = e.target.value; renderRows(); });
       document.getElementById('fSearch').addEventListener('input', (e) => { st.q = e.target.value; renderRows(); });
       renderTabs(); renderRows();
+      const openId = openParam();
+      if (openId && byId(STORE.audits, openId)) { if (SETTLED_ST.includes(byId(STORE.audits, openId).status)) { st.tab = 'settled'; renderTabs(); renderRows(); } openSettlementDrawer(openId); }
     });
   </script>
 </body>
