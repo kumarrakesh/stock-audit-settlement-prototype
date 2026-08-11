@@ -1,7 +1,7 @@
 /* Session-02 prototype shared JS — Foodbridge Module Settlement (discovery).
    Plain <script>, no modules, no build step (R5). Loaded by every screen.
-   A localStorage-backed store stands in for the backend (the discovery Addendum 011 pattern),
-   so edits on the counting screen persist and show up on the dashboard/sessions list.
+   A localStorage-backed store stands in for the backend, so edits on one screen persist
+   and show up on the dashboard / sessions list / settlement queue.
    resetStore() wipes back to the original seed. Distinct STORE_KEY from v1 so the two
    prototypes never clobber each other's demo state in the same browser. */
 
@@ -64,8 +64,8 @@ function entityChip(e) { return `<span class="chip ent-${e}">${e}</span>`; }
      not_counted        — actual is null (never entered)
      counted            — actual entered AND missing === 0 (fully reconciled)
      partially_counted  — actual entered AND missing > 0 (shortfall still open)
-   NOTE: negative variance = shortfall here, the OPPOSITE of ratified v1 (Addendum 013).
-   Reproduced from the session-02 mockups on purpose; a reconciliation ceremony call, not a bug. */
+   NOTE: negative variance = shortfall here. This sign convention is a deliberate design
+   choice from the session-02 mockups, under test in this iteration. */
 function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v) || 0; }
 function computeRow(p) {
   if (p.actual === null || p.actual === undefined) {
@@ -105,8 +105,8 @@ function varianceCell(v) {
 const NAV = [
   { key: 'dashboard', label: 'Dashboard', href: 'dashboard.html', icon: 'grid' },
   { key: 'audit-sessions', label: 'Audit Sessions', href: 'audit-sessions.html', icon: 'clipboard' },
-  { key: 'settlement-queue', label: 'Settlement Queue', href: '#', icon: 'list', stub: true },
-  { key: 'action-tickets', label: 'Action Tickets', href: '#', icon: 'ticket', stub: true },
+  { key: 'settlement-queue', label: 'Settlement Queue', href: 'settlement.html', icon: 'list' },
+  { key: 'action-tickets', label: 'Action Tickets', href: 'tickets.html', icon: 'ticket' },
   { key: 'snapshots', label: 'Snapshots', href: '#', icon: 'box', stub: true },
   { key: 'reports', label: 'Reports', href: '#', icon: 'chart', stub: true },
   { key: 'settings', label: 'Settings', href: '#', icon: 'gear', stub: true },
@@ -196,4 +196,75 @@ function wireClickableRows(root) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
     });
   });
+}
+
+/* ---------- Lifecycle helpers (audit lane) -----------------------------------
+   Edit-locking is a PROTOTYPE DEFAULT, not ratified (human held it open):
+     draft        — everything editable (header + products)
+     in_progress  — add products + edit product counts; header locked
+     everything else (submitted / under_review / approved / closed / cancelled) — read-only */
+function auditEditable(audit) {
+  const s = audit.status;
+  return {
+    header: s === 'draft',                                  // warehouse / entity / auditor / date
+    addProducts: s === 'draft' || s === 'in_progress',
+    counts: s === 'draft' || s === 'in_progress',
+    readonly: !(s === 'draft' || s === 'in_progress'),
+  };
+}
+function initials(name) { return String(name || '').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase(); }
+function userChipFor(s, id) { const u = byId(s.users, id) || {}; return { name: u.name || '—', role: u.role || '', initials: initials(u.name) }; }
+function priorityBadge(p) { return `<span class="badge pri-${p}">${labelize(p)}</span>`; }
+
+// Classification of a settlement line: prefer the seeded classification, else derive.
+function classify(p) {
+  if (p.classification) return p.classification;
+  const c = computeRow(p);
+  if (num(p.extra) > 0 && (c.missing || 0) === 0) return 'EXTRA';
+  if (num(p.expired) >= num(p.waste) && num(p.expired) > 0) return 'EXPIRED';
+  if (num(p.waste) > 0) return 'WASTE';
+  return 'MISSING';
+}
+function resolutionOptionsFor(s, classification) { return (s.resolutionOptions && s.resolutionOptions[classification]) || []; }
+function resolutionOption(s, classification, id) { return resolutionOptionsFor(s, classification).find((o) => o.id === id); }
+
+// A settlement line "needs resolution" when it has a non-zero variance.
+function needsResolution(p) { const c = computeRow(p); return c.counted && c.variance !== 0; }
+
+function nextSeqId(list, prefix) {
+  const re = new RegExp('^' + prefix.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '(\\d+)$');
+  const max = list.reduce((m, x) => { const mm = re.exec(String(x.id)); return mm ? Math.max(m, Number(mm[1])) : m; }, 0);
+  return prefix + String(max + 1).padStart(3, '0');
+}
+function evidenceSummary(ev) {
+  if (!ev) return '<span class="notice">No evidence</span>';
+  const ph = (ev.photos || []).length, dc = (ev.documents || []).length;
+  if (!ph && !dc) return '<span class="notice">No evidence</span>';
+  const bits = [];
+  if (ph) bits.push('📷 ' + ph + ' photo' + (ph > 1 ? 's' : ''));
+  if (dc) bits.push('📄 ' + dc + ' doc' + (dc > 1 ? 's' : ''));
+  return bits.join(' · ');
+}
+
+/* ---------- Modal ---------- */
+function openModal(title, bodyHtml, footerHtml) {
+  closeModal();
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-scrim';
+  wrap.id = 'modalScrim';
+  wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
+    <div class="modal-head"><h2>${title}</h2><button class="modal-close" type="button" aria-label="Close">×</button></div>
+    <div class="modal-body">${bodyHtml}</div>
+    ${footerHtml ? `<div class="modal-foot">${footerHtml}</div>` : ''}</div>`;
+  document.body.appendChild(wrap);
+  wrap.querySelector('.modal-close').addEventListener('click', closeModal);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) closeModal(); });
+  document.addEventListener('keydown', escClose);
+  return wrap;
+}
+function escClose(e) { if (e.key === 'Escape') closeModal(); }
+function closeModal() {
+  const m = document.getElementById('modalScrim');
+  if (m) m.remove();
+  document.removeEventListener('keydown', escClose);
 }

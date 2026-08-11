@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Action Tickets — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let STORE = null;
+    const TABS = ['all', 'open', 'in_progress', 'resolved', 'closed'];
+    const st = { tab: 'all', priority: '', assignee: '', q: '' };
+
+    function skeleton() {
+      return `
+        <div class="page-head">
+          <div><h1>Action Tickets</h1><div class="sub">Recovery &amp; follow-up tickets</div></div>
+          <div class="head-actions"><button class="btn primary" id="createBtn">${svg('plus')} Create Ticket</button></div>
+        </div>
+        <section class="filters">
+          <div class="filter-actions">
+            <div class="field" style="min-width:160px"><label>Priority</label><select id="fPri"><option value="">All Priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+            <div class="field" style="min-width:180px"><label>Assignee</label><select id="fAss"></select></div>
+            <div class="search-wrap grow" style="align-self:flex-end">${svg('search')}<input type="search" id="fSearch" placeholder="Search by Ticket ID, title, audit..." /></div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="tabs" id="tabs"></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Ticket ID</th><th>Title</th><th>Audit</th><th>Warehouse</th><th>Entity</th><th>Assignee</th><th>Priority</th><th>Status</th><th>Created</th><th></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table></div>
+        </section>`;
+    }
+
+    function base() {
+      return STORE.actionTickets.filter((t) => {
+        if (st.priority && t.priority !== st.priority) return false;
+        if (st.assignee && t.assignedToUserId !== st.assignee) return false;
+        if (st.q) { const h = (t.id + ' ' + t.title + ' ' + (t.auditId || '')).toLowerCase(); if (!h.includes(st.q.toLowerCase())) return false; }
+        return true;
+      });
+    }
+
+    function renderTabs() {
+      const b = base();
+      const count = (tab) => tab === 'all' ? b.length : b.filter((t) => t.status === tab).length;
+      document.getElementById('tabs').innerHTML = TABS.map((tab) => `<button class="tab${st.tab === tab ? ' active' : ''}" data-tab="${tab}">${tab === 'all' ? 'All' : labelize(tab)}<span class="count">${count(tab)}</span></button>`).join('');
+      document.querySelectorAll('.tab').forEach((el) => el.addEventListener('click', () => { st.tab = el.dataset.tab; renderTabs(); renderRows(); }));
+    }
+
+    function renderRows() {
+      let list = base();
+      if (st.tab !== 'all') list = list.filter((t) => t.status === st.tab);
+      const tbody = document.getElementById('rows');
+      if (!list.length) { tbody.innerHTML = `<tr><td colspan="10" class="empty">No tickets match.</td></tr>`; return; }
+      tbody.innerHTML = list.map((t) => `<tr class="clickable" data-id="${t.id}">
+        <td class="mono"><a class="strong-link" href="ticket-detail.html?id=${t.id}">${t.id}</a></td>
+        <td>${t.title}</td>
+        <td class="mono">${t.auditId ? `<a href="settlement-detail.html?id=${t.auditId}">${t.auditId}</a>` : '—'}</td>
+        <td>${warehouseName(STORE, t.warehouseId)}</td>
+        <td>${t.entity ? entityChip(t.entity) : '—'}</td>
+        <td>${userName(STORE, t.assignedToUserId)}</td>
+        <td>${priorityBadge(t.priority)}</td>
+        <td>${statusBadge(t.status)}</td>
+        <td class="mono">${fmtDateTime(t.createdAt)}</td>
+        <td><button class="btn sm" data-id="${t.id}">Open</button></td>
+      </tr>`).join('');
+      const go = (id) => location.href = 'ticket-detail.html?id=' + id;
+      wireClickableRows(tbody);
+      tbody.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button') && !e.target.closest('a')) go(tr.dataset.id); }));
+      tbody.querySelectorAll('button[data-id]').forEach((b) => b.addEventListener('click', () => go(b.dataset.id)));
+    }
+
+    function createModal() {
+      const auditOpts = '<option value="">— none —</option>' + STORE.audits.map((a) => `<option value="${a.id}">${a.id} · ${a.name}</option>`).join('');
+      const userOpts = STORE.users.map((u) => `<option value="${u.id}">${u.name} (${u.role})</option>`).join('');
+      const whOpts = STORE.warehouses.map((w) => `<option value="${w.id}">${w.name}</option>`).join('');
+      const entOpts = STORE.entities.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
+      openModal('Create Action Ticket',
+        `<div class="form-grid">
+          <div class="field full"><label>Title <span class="req">*</span></label><input type="text" id="tTitle" placeholder="e.g. Recover missing forklift" /></div>
+          <div class="field full"><label>Description</label><textarea id="tDesc" placeholder="What needs to happen and why…"></textarea></div>
+          <div class="field"><label>Related Audit</label><select id="tAudit">${auditOpts}</select></div>
+          <div class="field"><label>Assign to <span class="req">*</span></label><select id="tAssignee">${userOpts}</select></div>
+          <div class="field"><label>Warehouse</label><select id="tWh">${whOpts}</select></div>
+          <div class="field"><label>Entity</label><select id="tEnt">${entOpts}</select></div>
+          <div class="field"><label>Priority</label><select id="tPri"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div>
+        </div>`,
+        `<button class="btn ghost" id="tCancel">Cancel</button><button class="btn primary" id="tSave">Create &amp; Assign</button>`);
+      document.getElementById('tCancel').addEventListener('click', closeModal);
+      document.getElementById('tSave').addEventListener('click', () => {
+        const title = document.getElementById('tTitle').value.trim();
+        if (!title) { toast('Title is required.'); return; }
+        const id = nextSeqId(STORE.actionTickets, 'AT-2405-');
+        STORE.actionTickets.unshift({
+          id, auditId: document.getElementById('tAudit').value || null, productId: null,
+          warehouseId: document.getElementById('tWh').value, entity: document.getElementById('tEnt').value,
+          title, description: document.getElementById('tDesc').value.trim(),
+          status: 'open', priority: document.getElementById('tPri').value,
+          assignedToUserId: document.getElementById('tAssignee').value, createdByUserId: STORE.currentUser.id,
+          createdAt: nowIso(), comments: [],
+        });
+        saveStore(STORE); closeModal(); toast('Ticket ' + id + ' created & assigned.');
+        renderTabs(); renderRows();
+      });
+    }
+
+    loadStore().then((s) => {
+      STORE = s;
+      document.getElementById('content').innerHTML = skeleton();
+      renderShell('action-tickets', { user: s.currentUser, crumbTitle: 'Action Tickets' });
+      document.getElementById('fAss').innerHTML = '<option value="">All Assignees</option>' + s.users.map((u) => `<option value="${u.id}">${u.name}</option>`).join('');
+      document.getElementById('fPri').addEventListener('change', (e) => { st.priority = e.target.value; renderTabs(); renderRows(); });
+      document.getElementById('fAss').addEventListener('change', (e) => { st.assignee = e.target.value; renderTabs(); renderRows(); });
+      document.getElementById('fSearch').addEventListener('input', (e) => { st.q = e.target.value; renderTabs(); renderRows(); });
+      document.getElementById('createBtn').addEventListener('click', createModal);
+      renderTabs(); renderRows();
+    });
+  </script>
+</body>
+</html>

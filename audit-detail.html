@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit Detail — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let STORE = null, AUDIT = null, EDIT = null;
+
+    function persist() { AUDIT.updatedAt = nowIso(); saveStore(STORE); }
+
+    function skeleton() {
+      const canReview = AUDIT.products && AUDIT.products.length && (AUDIT.status === 'in_progress' || AUDIT.status === 'draft');
+      return `
+        <a class="back-link" href="audit-sessions.html">← Audit Sessions</a>
+        <div class="page-head">
+          <div>
+            <h1 style="display:flex;align-items:center;gap:.6rem">${AUDIT.name} ${statusBadge(AUDIT.status)}</h1>
+            <div class="sub mono">${AUDIT.id}</div>
+          </div>
+          <div class="head-actions">
+            ${EDIT.header ? '<button class="btn" id="editMetaBtn">Edit details</button>' : ''}
+            ${EDIT.addProducts ? `<button class="btn" id="addProductBtn">${svg('plus')} Add Product</button>` : ''}
+            ${canReview ? '<button class="btn primary" id="reviewBtn">Review &amp; Submit</button>' : ''}
+          </div>
+        </div>
+
+        <section class="panel"><div class="card-pad">
+          <div class="meta-grid">
+            <div><div class="k">Warehouse</div><div class="v">${warehouseName(STORE, AUDIT.warehouseId)}</div></div>
+            <div><div class="k">Entity</div><div class="v">${entityChip(AUDIT.entity)} ${entityName(STORE, AUDIT.entity)}</div></div>
+            <div><div class="k">Audit Date</div><div class="v">${AUDIT.auditDate || '—'}</div></div>
+            <div><div class="k">Assigned Auditor</div><div class="v">${userName(STORE, AUDIT.auditorUserId)}</div></div>
+            <div><div class="k">Created</div><div class="v">${fmtDateTime(AUDIT.createdAt)}</div></div>
+            <div><div class="k">Last Updated</div><div class="v">${fmtDateTime(AUDIT.updatedAt)}</div></div>
+          </div>
+          ${EDIT.readonly ? '<div style="margin-top:1rem"><span class="lock-note">🔒 This audit is ' + labelize(AUDIT.status) + ' — locked for editing.</span></div>'
+            : (AUDIT.status === 'in_progress' ? '<div style="margin-top:1rem"><span class="lock-note">🔒 In Progress — you can add products and edit counts; audit details are locked.</span></div>' : '')}
+        </div></section>
+
+        <div class="kpi-row" id="kpis"></div>
+
+        <h2 class="section-title">Products <span class="sub" id="prodCount"></span></h2>
+        <section class="panel">
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>Product</th><th>Batch No.</th><th>Location</th>
+              <th class="num">Expected</th><th class="num">Actual</th><th class="num">Variance</th><th>Status</th><th></th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table></div>
+        </section>`;
+    }
+
+    function renderKpis() {
+      if (!AUDIT.products || !AUDIT.products.length) { document.getElementById('kpis').innerHTML = ''; return; }
+      const t = auditTotals(AUDIT);
+      const kpi = (tile, icon, label, value) => `<div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div><div class="value">${value}</div></div>`;
+      document.getElementById('kpis').innerHTML =
+        kpi('blue', 'box', 'Products', `${t.counted} / ${t.total}`) +
+        kpi('purple', 'db', 'Expected', fmtQty(t.expected)) +
+        kpi('green', 'clipboard', 'Actual', fmtQty(t.actual)) +
+        kpi('orange', 'chart', 'Variance', `<span class="${t.variance < 0 ? 'neg' : t.variance > 0 ? 'pos' : 'zero'}">${fmtQty(t.variance)}</span>`) +
+        kpi('red', 'list', 'Missing', `<span class="neg">${fmtQty(t.missing)}</span>`) +
+        kpi('green', 'plus', 'Extra', `<span class="pos">${fmtQty(t.extra)}</span>`);
+    }
+
+    function renderRows() {
+      const rows = AUDIT.products || [];
+      document.getElementById('prodCount').textContent = rows.length ? `(${rows.length})` : '';
+      const tbody = document.getElementById('rows');
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty">No products yet.${EDIT.addProducts ? ' Use “Add Product” to start counting.' : ''}</td></tr>`;
+        return;
+      }
+      const actionLabel = EDIT.readonly ? 'View' : 'Count / Edit';
+      tbody.innerHTML = rows.map((p) => {
+        const c = computeRow(p);
+        return `<tr class="clickable" data-pid="${p.productId}">
+          <td><div><strong>${p.name}</strong></div><div class="sub mono">SKU: ${p.sku}</div></td>
+          <td class="mono">${p.batchNo}</td>
+          <td class="mono">${p.location}</td>
+          <td class="num mono">${fmtQty(p.expected)}</td>
+          <td class="num mono">${c.counted ? fmtQty(num(p.actual)) : '<span class="notice">—</span>'}</td>
+          <td class="num mono">${varianceCell(c.variance)}</td>
+          <td>${statusBadge(c.counted ? c.status : 'not_counted')}</td>
+          <td><button class="btn sm" data-pid="${p.productId}">${actionLabel}</button></td>
+        </tr>`;
+      }).join('');
+      const go = (pid) => location.href = `product-detail.html?auditId=${AUDIT.id}&productId=${pid}`;
+      wireClickableRows(tbody);
+      tbody.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button')) go(tr.dataset.pid); }));
+      tbody.querySelectorAll('button[data-pid]').forEach((b) => b.addEventListener('click', () => go(b.dataset.pid)));
+    }
+
+    function addProductModal() {
+      openModal('Add Product',
+        `<div class="form-grid">
+          <div class="field full"><label>Product name <span class="req">*</span></label><input type="text" id="apName" placeholder="e.g. Milk Pouch 500ml" /></div>
+          <div class="field"><label>SKU</label><input type="text" id="apSku" placeholder="MILK-500" /></div>
+          <div class="field"><label>Batch No.</label><input type="text" id="apBatch" placeholder="B240527-01" /></div>
+          <div class="field"><label>Location</label><input type="text" id="apLoc" placeholder="A-01-01" /></div>
+          <div class="field"><label>Expected (Base Unit)</label><input type="number" id="apExp" min="0" step="0.001" value="0" /></div>
+        </div>`,
+        `<button class="btn ghost" id="apCancel">Cancel</button><button class="btn primary" id="apSave">Add Product</button>`);
+      document.getElementById('apCancel').addEventListener('click', closeModal);
+      document.getElementById('apSave').addEventListener('click', () => {
+        const name = document.getElementById('apName').value.trim();
+        if (!name) { toast('Product name is required.'); return; }
+        const idx = (AUDIT.products || []).length + 1;
+        AUDIT.products = AUDIT.products || [];
+        AUDIT.products.push({
+          productId: 'NP-' + AUDIT.id.slice(-3) + '-' + idx,
+          name, sku: document.getElementById('apSku').value.trim() || '—',
+          batchNo: document.getElementById('apBatch').value.trim() || '—',
+          location: document.getElementById('apLoc').value.trim() || '—',
+          expected: Number(document.getElementById('apExp').value) || 0,
+          actual: null, expired: null, waste: null, extra: null,
+        });
+        if (AUDIT.status === 'draft') AUDIT.status = 'in_progress';
+        persist(); closeModal(); toast('Product added.');
+        location.reload();
+      });
+    }
+
+    function editMetaModal() {
+      const opt = (list, sel, vk, lk) => list.map((i) => `<option value="${i[vk]}" ${i[vk] === sel ? 'selected' : ''}>${i[lk]}</option>`).join('');
+      openModal('Edit Audit Details',
+        `<div class="form-grid">
+          <div class="field full"><label>Audit name</label><input type="text" id="emName" value="${AUDIT.name}" /></div>
+          <div class="field"><label>Warehouse</label><select id="emWh">${opt(STORE.warehouses, AUDIT.warehouseId, 'id', 'name')}</select></div>
+          <div class="field"><label>Entity</label><select id="emEnt">${opt(STORE.entities, AUDIT.entity, 'id', 'name')}</select></div>
+          <div class="field"><label>Assigned Auditor</label><select id="emAud">${opt(STORE.users.filter((u) => u.role === 'Auditor'), AUDIT.auditorUserId, 'id', 'name')}</select></div>
+          <div class="field"><label>Audit date</label><input type="text" id="emDate" value="${AUDIT.auditDate || ''}" placeholder="2024-05-30" /></div>
+        </div>`,
+        `<button class="btn ghost" id="emCancel">Cancel</button><button class="btn primary" id="emSave">Save</button>`);
+      document.getElementById('emCancel').addEventListener('click', closeModal);
+      document.getElementById('emSave').addEventListener('click', () => {
+        AUDIT.name = document.getElementById('emName').value.trim() || AUDIT.name;
+        AUDIT.warehouseId = document.getElementById('emWh').value;
+        AUDIT.entity = document.getElementById('emEnt').value;
+        AUDIT.auditorUserId = document.getElementById('emAud').value;
+        AUDIT.auditDate = document.getElementById('emDate').value.trim();
+        persist(); closeModal(); toast('Details updated.'); location.reload();
+      });
+    }
+
+    loadStore().then((s) => {
+      STORE = s;
+      AUDIT = byId(s.audits, qp('id', '')) || s.audits[0];
+      EDIT = auditEditable(AUDIT);
+      document.getElementById('content').innerHTML = skeleton();
+      renderShell('audit-sessions', { user: s.currentUser, crumbs: [
+        { label: 'Audit Sessions', href: 'audit-sessions.html' },
+        { label: AUDIT.id },
+      ] });
+      renderKpis();
+      renderRows();
+      const rb = document.getElementById('reviewBtn'); if (rb) rb.addEventListener('click', () => location.href = 'audit-review.html?id=' + AUDIT.id);
+      const ap = document.getElementById('addProductBtn'); if (ap) ap.addEventListener('click', addProductModal);
+      const em = document.getElementById('editMetaBtn'); if (em) em.addEventListener('click', editMetaModal);
+    });
+  </script>
+</body>
+</html>

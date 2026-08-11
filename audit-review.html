@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review &amp; Submit — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let STORE = null, AUDIT = null;
+    const backHref = () => 'audit-detail.html?id=' + AUDIT.id;
+
+    function render() {
+      const rows = AUDIT.products || [];
+      const t = auditTotals(AUDIT);
+      const notCounted = rows.filter((p) => !computeRow(p).counted);
+      const invalid = rows.filter((p) => !computeRow(p).valid);
+      const varianceItems = rows.filter((p) => needsResolution(p));
+
+      const warn = [];
+      if (invalid.length) warn.push(`<div class="lock-note" style="color:var(--red);background:var(--red-bg)">⚠ ${invalid.length} product(s) break the balance rule</div>`);
+      if (notCounted.length) warn.push(`<div class="lock-note">⚠ ${notCounted.length} product(s) not counted</div>`);
+      if (varianceItems.length) warn.push(`<div class="lock-note" style="color:var(--blue-dark);background:var(--blue-bg)">ℹ ${varianceItems.length} variance item(s) will go to settlement</div>`);
+
+      document.getElementById('content').innerHTML = `
+        <a class="back-link" href="${backHref()}">← ${AUDIT.id} · ${AUDIT.name}</a>
+        <div class="stepper">
+          <span class="step done"><span class="num">✓</span>Count</span><span class="arrow">→</span>
+          <span class="step active"><span class="num">2</span>Review</span><span class="arrow">→</span>
+          <span class="step"><span class="num">3</span>Submit</span>
+        </div>
+        <div class="page-head">
+          <div><h1>Review &amp; Submit</h1><div class="sub mono">${AUDIT.id} · ${warehouseName(STORE, AUDIT.warehouseId)} · ${entityChip(AUDIT.entity)}</div></div>
+          <div class="head-actions">
+            <a class="btn" href="${backHref()}">Back to counting</a>
+            <button class="btn primary" id="submitBtn">Submit Audit</button>
+          </div>
+        </div>
+
+        <div class="kpi-row" id="kpis"></div>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:0 0 1rem">${warn.join('')}</div>
+
+        <section class="panel">
+          <div class="table-wrap"><table>
+            <thead><tr><th>Product</th><th>Batch</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Missing</th><th class="num">Variance</th><th>Status</th><th>Evidence</th></tr></thead>
+            <tbody>${rows.map((p) => { const c = computeRow(p); return `<tr>
+              <td><strong>${p.name}</strong><div class="sub mono">${p.sku}</div></td>
+              <td class="mono">${p.batchNo}</td>
+              <td class="num mono">${fmtQty(p.expected)}</td>
+              <td class="num mono">${c.counted ? fmtQty(num(p.actual)) : '<span class="notice">—</span>'}</td>
+              <td class="num mono">${c.missing === null ? '—' : (c.missing > 0 ? '<span class="neg">' + fmtQty(c.missing) + '</span>' : '0.000')}</td>
+              <td class="num mono">${varianceCell(c.variance)}</td>
+              <td>${statusBadge(c.counted ? c.status : 'not_counted')}${c.valid ? '' : ' <span class="neg">⚠</span>'}</td>
+              <td class="sub">${evidenceSummary(p.evidence)}</td></tr>`; }).join('')}</tbody>
+          </table></div>
+        </section>`;
+
+      const kpi = (tile, icon, label, value) => `<div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div><div class="value">${value}</div></div>`;
+      document.getElementById('kpis').innerHTML =
+        kpi('blue', 'box', 'Products', `${t.counted} / ${t.total}`) +
+        kpi('purple', 'db', 'Expected', fmtQty(t.expected)) +
+        kpi('green', 'clipboard', 'Actual', fmtQty(t.actual)) +
+        kpi('orange', 'chart', 'Variance', `<span class="${t.variance < 0 ? 'neg' : t.variance > 0 ? 'pos' : 'zero'}">${fmtQty(t.variance)}</span>`);
+
+      document.getElementById('submitBtn').addEventListener('click', () => doSubmit(invalid, notCounted));
+    }
+
+    function doSubmit(invalid, notCounted) {
+      if (invalid.length) { toast(invalid.length + ' balance violation(s) — fix before submitting.'); return; }
+      const finish = () => {
+        AUDIT.status = 'submitted'; AUDIT.submittedAt = nowIso(); AUDIT.updatedAt = nowIso(); saveStore(STORE);
+        toast('Audit submitted — now in the Settlement Queue.');
+        setTimeout(() => location.href = 'settlement.html', 1200);
+      };
+      if (notCounted.length) {
+        openModal('Submit with uncounted products?',
+          `<p>${notCounted.length} product(s) have not been counted. They will be recorded as <strong>not counted</strong> on submission.</p><p class="help">You can still go back and count them.</p>`,
+          `<button class="btn ghost" id="cxl">Go back</button><button class="btn primary" id="ok">Submit anyway</button>`);
+        document.getElementById('cxl').addEventListener('click', closeModal);
+        document.getElementById('ok').addEventListener('click', () => { closeModal(); finish(); });
+      } else { finish(); }
+    }
+
+    loadStore().then((s) => {
+      STORE = s;
+      AUDIT = byId(s.audits, qp('id', '')) || s.audits[0];
+      document.getElementById('content').innerHTML = '';
+      render();
+      renderShell('audit-sessions', { user: s.currentUser, crumbs: [
+        { label: 'Audit Sessions', href: 'audit-sessions.html' },
+        { label: AUDIT.id, href: backHref() },
+        { label: 'Review & Submit' },
+      ] });
+      // re-bind after shell rebuild
+      document.getElementById('submitBtn').addEventListener('click', () => {
+        const rows = AUDIT.products || [];
+        doSubmit(rows.filter((p) => !computeRow(p).valid), rows.filter((p) => !computeRow(p).counted));
+      });
+    });
+  </script>
+</body>
+</html>

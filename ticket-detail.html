@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ticket — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let STORE = null, T = null;
+    const NEXT = { open: 'in_progress', in_progress: 'resolved', resolved: 'closed' };
+    const NEXT_LABEL = { open: 'Start Work', in_progress: 'Mark Resolved', resolved: 'Close Ticket' };
+
+    function persist() { saveStore(STORE); }
+    function activity(text) { T.comments = T.comments || []; T.comments.push({ who: STORE.currentUser.name, when: nowIso(), text, system: true }); }
+
+    function skeleton() {
+      const closed = T.status === 'closed';
+      const nxt = NEXT[T.status];
+      return `
+        <a class="back-link" href="tickets.html">← Action Tickets</a>
+        <div class="page-head">
+          <div><h1 style="display:flex;align-items:center;gap:.6rem" id="hTitle">${T.title} ${statusBadge(T.status)}</h1>
+            <div class="sub mono">${T.id}${T.auditId ? ' · from <a href="settlement-detail.html?id=' + T.auditId + '">' + T.auditId + '</a>' : ''}</div></div>
+          <div class="head-actions">
+            <button class="btn" id="editBtn">Edit</button>
+            ${nxt ? `<button class="btn primary" id="advanceBtn">${NEXT_LABEL[T.status]}</button>` : ''}
+            ${closed ? '<button class="btn" id="reopenBtn">Reopen</button>' : ''}
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <section class="panel"><div class="card-pad">
+            <h2 class="section-title" style="margin-top:0">Description</h2>
+            <p id="descText" style="white-space:pre-wrap">${T.description || '<span class="notice">No description.</span>'}</p>
+
+            <h2 class="section-title">Comments &amp; Activity</h2>
+            <div id="comments"></div>
+            <div class="comment-box">
+              <textarea id="newComment" placeholder="Add a comment…"></textarea>
+              <div class="actions-row" style="margin-top:0"><button class="btn primary" id="addComment">Add comment</button></div>
+            </div>
+          </div></section>
+
+          <aside class="panel"><div class="card-pad">
+            <h2 class="section-title" style="margin-top:0">Manage</h2>
+            <div class="field"><label>Assignee</label><select id="assignee"></select></div>
+            <div class="field" style="margin-top:.7rem"><label>Priority</label><select id="priority">
+              <option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+            <div class="actions-row" style="justify-content:flex-start"><button class="btn" id="saveManage">Save changes</button></div>
+
+            <h2 class="section-title">Context</h2>
+            <div class="meta-grid" style="grid-template-columns:1fr">
+              <div><div class="k">Related Audit</div><div class="v mono">${T.auditId ? `<a href="settlement-detail.html?id=${T.auditId}">${T.auditId}</a>` : '—'}</div></div>
+              <div><div class="k">Warehouse</div><div class="v">${warehouseName(STORE, T.warehouseId)}</div></div>
+              <div><div class="k">Entity</div><div class="v">${T.entity ? entityChip(T.entity) : '—'}</div></div>
+              <div><div class="k">Created</div><div class="v">${fmtDateTime(T.createdAt)}</div></div>
+              <div><div class="k">Created by</div><div class="v">${userName(STORE, T.createdByUserId)}</div></div>
+            </div>
+          </div></aside>
+        </div>`;
+    }
+
+    function renderComments() {
+      const list = T.comments || [];
+      document.getElementById('comments').innerHTML = list.length ? list.map((c) => `
+        <div class="comment"><div><span class="who">${c.who}</span><span class="when">${fmtDateTime(c.when)}</span>${c.system ? ' <span class="badge st-draft">activity</span>' : ''}</div>
+          <div class="text">${c.text}</div></div>`).join('') : '<span class="notice">No comments yet.</span>';
+    }
+
+    function reflectHeader() {
+      document.getElementById('hTitle').innerHTML = `${T.title} ${statusBadge(T.status)}`;
+    }
+
+    function editModal() {
+      openModal('Edit Ticket',
+        `<div class="form-grid">
+          <div class="field full"><label>Title</label><input type="text" id="eTitle" value="${T.title.replace(/"/g, '&quot;')}" /></div>
+          <div class="field full"><label>Description</label><textarea id="eDesc">${T.description || ''}</textarea></div>
+        </div>`,
+        `<button class="btn ghost" id="eCancel">Cancel</button><button class="btn primary" id="eSave">Save</button>`);
+      document.getElementById('eCancel').addEventListener('click', closeModal);
+      document.getElementById('eSave').addEventListener('click', () => {
+        T.title = document.getElementById('eTitle').value.trim() || T.title;
+        T.description = document.getElementById('eDesc').value.trim();
+        persist(); closeModal(); location.reload();
+      });
+    }
+
+    loadStore().then((s) => {
+      STORE = s;
+      T = byId(s.actionTickets, qp('id', '')) || s.actionTickets[0];
+      document.getElementById('content').innerHTML = skeleton();
+      renderShell('action-tickets', { user: s.currentUser, crumbs: [
+        { label: 'Action Tickets', href: 'tickets.html' }, { label: T.id },
+      ] });
+
+      document.getElementById('assignee').innerHTML = s.users.map((u) => `<option value="${u.id}" ${u.id === T.assignedToUserId ? 'selected' : ''}>${u.name} (${u.role})</option>`).join('');
+      document.getElementById('priority').value = T.priority;
+      renderComments();
+
+      document.getElementById('addComment').addEventListener('click', () => {
+        const el = document.getElementById('newComment'); const txt = el.value.trim();
+        if (!txt) { toast('Write a comment first.'); return; }
+        T.comments = T.comments || []; T.comments.push({ who: STORE.currentUser.name, when: nowIso(), text: txt });
+        el.value = ''; persist(); renderComments(); toast('Comment added.');
+      });
+      document.getElementById('saveManage').addEventListener('click', () => {
+        const newAss = document.getElementById('assignee').value;
+        const newPri = document.getElementById('priority').value;
+        let changed = false;
+        if (newAss !== T.assignedToUserId) { activity(`Reassigned to ${userName(STORE, newAss)}.`); T.assignedToUserId = newAss; changed = true; }
+        if (newPri !== T.priority) { activity(`Priority set to ${labelize(newPri)}.`); T.priority = newPri; changed = true; }
+        if (!changed) { toast('No changes.'); return; }
+        persist(); renderComments(); toast('Saved.');
+      });
+      const adv = document.getElementById('advanceBtn');
+      if (adv) adv.addEventListener('click', () => {
+        const to = NEXT[T.status]; T.status = to; activity(`Status changed to ${labelize(to)}.`);
+        persist(); reflectHeader(); renderComments(); location.reload();
+      });
+      const re = document.getElementById('reopenBtn');
+      if (re) re.addEventListener('click', () => { T.status = 'open'; activity('Ticket reopened.'); persist(); location.reload(); });
+      document.getElementById('editBtn').addEventListener('click', editModal);
+    });
+  </script>
+</body>
+</html>

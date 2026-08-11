@@ -118,7 +118,7 @@
           const canContinue = a.status === 'in_progress' || a.status === 'draft';
           const actionLabel = canContinue ? 'Continue' : 'View';
           return `<tr class="clickable" data-id="${a.id}">
-            <td class="mono"><a class="strong-link" href="audit-counting.html?id=${a.id}">${a.id}</a></td>
+            <td class="mono"><a class="strong-link" href="audit-detail.html?id=${a.id}">${a.id}</a></td>
             <td>${a.name}</td>
             <td>${warehouseName(STORE, a.warehouseId)}</td>
             <td>${entityChip(a.entity)}</td>
@@ -145,9 +145,9 @@
       // Wire rows + actions + pager
       wireClickableRows(document);
       tbody.querySelectorAll('tr.clickable').forEach((tr) =>
-        tr.addEventListener('click', (e) => { if (!e.target.closest('button')) location.href = 'audit-counting.html?id=' + tr.dataset.id; }));
+        tr.addEventListener('click', (e) => { if (!e.target.closest('button')) location.href = 'audit-detail.html?id=' + tr.dataset.id; }));
       tbody.querySelectorAll('button[data-action]').forEach((b) =>
-        b.addEventListener('click', () => location.href = 'audit-counting.html?id=' + b.dataset.action));
+        b.addEventListener('click', () => location.href = 'audit-detail.html?id=' + b.dataset.action));
       document.querySelectorAll('.page-btn').forEach((b) => b.addEventListener('click', () => {
         const v = b.dataset.page;
         if (v === 'prev') state.page = Math.max(1, state.page - 1);
@@ -161,18 +161,34 @@
 
     function createAudit() {
       const seqs = STORE.audits.map((a) => { const m = /AUD-2405-(\d+)/.exec(a.id); return m ? Number(m[1]) : 0; });
-      const nextNum = String(Math.max(0, ...seqs) + 1).padStart(3, '0');
-      const id = 'AUD-2405-' + nextNum;
-      STORE.audits.unshift({
-        id, name: 'New Stock Audit — ' + id, warehouseId: 'WH-01', entity: 'FG',
-        auditorUserId: STORE.counterUser.id, status: 'draft', createdAt: nowIso(), updatedAt: nowIso(),
-        submittedAt: null, progress: 0, countedTotal: 0, productTotal: 0, products: [],
+      const nextId = 'AUD-2405-' + String(Math.max(0, ...seqs) + 1).padStart(3, '0');
+      const whOpts = STORE.warehouses.map((w) => `<option value="${w.id}">${w.name}</option>`).join('');
+      const entOpts = STORE.entities.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
+      const audOpts = STORE.users.filter((u) => u.role === 'Auditor').map((u) => `<option value="${u.id}">${u.name}</option>`).join('');
+      openModal('Create Audit',
+        `<div class="form-grid">
+          <div class="field full"><label>Audit name <span class="req">*</span></label><input type="text" id="caName" value="Stock Audit — ${nextId}" /></div>
+          <div class="field"><label>Warehouse</label><select id="caWh">${whOpts}</select></div>
+          <div class="field"><label>Entity</label><select id="caEnt">${entOpts}</select></div>
+          <div class="field"><label>Assign auditor <span class="req">*</span></label><select id="caAud">${audOpts}</select></div>
+          <div class="field"><label>Audit date</label><input type="text" id="caDate" placeholder="2024-05-31" /></div>
+        </div><p class="help">New audits start as <strong>Draft</strong>. Add products from the audit detail page to begin counting.</p>`,
+        `<button class="btn ghost" id="caCancel">Cancel</button><button class="btn primary" id="caSave">Create &amp; Assign</button>`);
+      document.getElementById('caCancel').addEventListener('click', closeModal);
+      document.getElementById('caSave').addEventListener('click', () => {
+        const name = document.getElementById('caName').value.trim();
+        if (!name) { toast('Audit name is required.'); return; }
+        STORE.audits.unshift({
+          id: nextId, name, warehouseId: document.getElementById('caWh').value, entity: document.getElementById('caEnt').value,
+          auditorUserId: document.getElementById('caAud').value, status: 'draft', createdAt: nowIso(), updatedAt: nowIso(),
+          submittedAt: null, auditDate: document.getElementById('caDate').value.trim(), progress: 0, countedTotal: 0, productTotal: 0, products: [],
+        });
+        saveStore(STORE);
+        closeModal();
+        state.status = 'all'; state.page = 1; document.getElementById('fStatus').value = '';
+        renderAll();
+        toast('Audit ' + nextId + ' created & assigned.');
       });
-      saveStore(STORE);
-      state.status = 'all'; state.page = 1;
-      document.getElementById('fStatus').value = '';
-      renderAll();
-      toast('Draft ' + id + ' created.');
     }
 
     loadStore().then((s) => {
