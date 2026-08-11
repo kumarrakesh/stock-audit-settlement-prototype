@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settlement Dashboard — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let STORE = null;
+    const dState = { warehouse: '', entity: '' };
+
+    function skeleton() {
+      return `
+        <div class="page-head">
+          <div><h1>Settlement Dashboard</h1><div class="sub">Overview of audits, settlements and action items</div></div>
+          <div class="head-actions">
+            <div class="field" style="min-width:150px"><label>Warehouse</label><select id="dWarehouse"></select></div>
+            <div class="field" style="min-width:150px"><label>Entity</label><select id="dEntity"></select></div>
+            <div class="field" style="min-width:170px"><label>Date Range</label><input type="text" value="01 May 2024 - 31 May 2024" readonly /></div>
+            <button class="btn primary" id="refreshBtn" style="align-self:flex-end">${svg('refresh')} Refresh</button>
+          </div>
+        </div>
+
+        <div class="kpi-row" id="kpis"></div>
+
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head"><h2>Variance Summary (This Month)</h2></div>
+            <div class="donut-wrap" id="varianceSummary"></div>
+            <div class="chart-note">All values are in Base Unit (e.g. Kg, Ltr, Nos).</div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>Variance Trend</h2></div>
+            <div id="trend" style="padding:1.1rem 1.25rem"></div>
+          </section>
+        </div>
+
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head"><h2>Recent Audit Sessions</h2><a href="audit-sessions.html">View all</a></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Audit ID</th><th>Warehouse</th><th>Entity</th><th>Auditor</th><th>Status</th><th>Progress</th><th>Updated On</th></tr></thead>
+              <tbody id="recentAudits"></tbody>
+            </table></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>Pending Settlements</h2><a href="audit-sessions.html">View all</a></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Settlement ID</th><th>Audit ID</th><th>Warehouse</th><th>Entity</th><th>Submitted On</th><th>Priority</th></tr></thead>
+              <tbody id="pendingSettlements"></tbody>
+            </table></div>
+          </section>
+        </div>
+
+        <div class="chart-note" style="padding:1.25rem 0 0">All dates and times are shown in your local timezone. &nbsp;·&nbsp; Foodbridge Settlement Module v1.0.0</div>`;
+    }
+
+    function matchWE(x) {
+      return (!dState.warehouse || x.warehouseId === dState.warehouse) && (!dState.entity || x.entity === dState.entity);
+    }
+
+    function renderKpis() {
+      const audits = STORE.audits.filter(matchWE);
+      const settlements = STORE.settlements.filter(matchWE);
+      const tickets = STORE.actionTickets.filter(matchWE);
+      const pendingAudits = audits.filter((a) => a.status === 'draft' || a.status === 'in_progress').length;
+      const pendingSettlements = settlements.filter((s) => s.status === 'pending_review' || s.status === 'under_review').length;
+      const pendingTickets = tickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length;
+
+      const card = (tile, icon, label, value, sub, link) => `
+        <div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div>
+          <div class="value">${value}</div><div class="sub">${sub}</div>
+          <div class="foot"><a href="${link.href}"${link.stub ? ' data-stub="1"' : ''}>${link.text} →</a></div></div>`;
+      document.getElementById('kpis').innerHTML =
+        card('blue', 'clipboard', 'Pending Audits', pendingAudits, 'Draft / In Progress', { text: 'View all', href: 'audit-sessions.html' }) +
+        card('orange', 'list', 'Pending Settlements', pendingSettlements, 'Awaiting Review', { text: 'View queue', href: '#', stub: true }) +
+        card('purple', 'ticket', 'Pending Action Tickets', pendingTickets, 'Require Attention', { text: 'View tickets', href: '#', stub: true }) +
+        card('green', 'box', 'Completed Audits', STORE.dashboard.completedThisMonth, 'This Month', { text: 'View all', href: 'audit-sessions.html' }) +
+        card('teal', 'box', 'Snapshots Created', STORE.dashboard.snapshotsThisMonth, 'This Month', { text: 'View snapshots', href: '#', stub: true });
+      document.querySelectorAll('#kpis a[data-stub]').forEach((el) =>
+        el.addEventListener('click', (e) => { e.preventDefault(); toast('That screen isn’t part of the session-02 prototype yet.'); }));
+    }
+
+    function renderVarianceSummary() {
+      const vs = STORE.dashboard.varianceSummary;
+      const seg = [
+        { key: 'Missing', color: '#b3261e', mag: Math.abs(vs.missing), display: -vs.missing },
+        { key: 'Extra', color: '#1a7f4b', mag: Math.abs(vs.extra), display: vs.extra },
+        { key: 'Waste', color: '#e08a00', mag: Math.abs(vs.waste), display: -vs.waste },
+        { key: 'Expired', color: '#6d28d9', mag: Math.abs(vs.expired), display: -vs.expired },
+      ];
+      const sum = seg.reduce((a, s) => a + s.mag, 0) || 1;
+      let acc = 0;
+      const stops = seg.map((s) => { const from = (acc / sum) * 100; acc += s.mag; const to = (acc / sum) * 100; return `${s.color} ${from}% ${to}%`; }).join(', ');
+      const legend = seg.map((s) => `
+        <div class="row"><span class="sw" style="background:${s.color}"></span>
+          <span class="lab">${s.key}</span>
+          <span class="val ${s.display < 0 ? 'neg' : 'pos'}">${s.display < 0 ? '' : '+'}${fmtQty(s.display)}</span>
+          <span class="share">(${Math.round((s.mag / sum) * 100)}%)</span></div>`).join('');
+      document.getElementById('varianceSummary').innerHTML = `
+        <div class="donut" style="border-radius:50%;background:conic-gradient(${stops})">
+          <div style="position:absolute;inset:24%;background:var(--card);border-radius:50%"></div>
+          <div class="center"><div class="cap">Total Variance</div><div class="big neg">${fmtQty(vs.totalVariance)}</div></div>
+        </div>
+        <div class="legend">${legend}</div>`;
+    }
+
+    function renderTrend() {
+      const data = STORE.dashboard.trend;
+      const series = [
+        { key: 'missing', color: '#b3261e', label: 'Missing' },
+        { key: 'extra', color: '#1a7f4b', label: 'Extra' },
+        { key: 'waste', color: '#e08a00', label: 'Waste' },
+        { key: 'expired', color: '#6d28d9', label: 'Expired' },
+      ];
+      const W = 580, H = 220, pl = 44, pr = 12, pt = 12, pb = 30;
+      let min = 0, max = 0;
+      data.forEach((d) => series.forEach((s) => { min = Math.min(min, d[s.key]); max = Math.max(max, d[s.key]); }));
+      const range = (max - min) || 1;
+      const x = (i) => pl + (i * (W - pl - pr)) / (data.length - 1);
+      const y = (v) => pt + ((max - v) / range) * (H - pt - pb);
+
+      // gridlines + y labels at min, 0, max and a couple between
+      const yTicks = [max, max / 2, 0, min / 2, min];
+      const grid = yTicks.map((v) => {
+        const yy = y(v);
+        return `<line x1="${pl}" y1="${yy}" x2="${W - pr}" y2="${yy}" stroke="#eef0f3" />
+                <text x="${pl - 6}" y="${yy + 3}" text-anchor="end" font-size="9" fill="#9aa2ad">${Math.round(v)}</text>`;
+      }).join('');
+      const zeroY = y(0);
+      const xLabels = data.map((d, i) => `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="#9aa2ad">${d.date}</text>`).join('');
+      const lines = series.map((s) => {
+        const pts = data.map((d, i) => `${x(i)},${y(d[s.key])}`).join(' ');
+        const dots = data.map((d, i) => `<circle cx="${x(i)}" cy="${y(d[s.key])}" r="2.4" fill="${s.color}" />`).join('');
+        return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />${dots}`;
+      }).join('');
+      const legend = series.map((s) => `<span style="display:inline-flex;align-items:center;gap:.35rem;font-size:.8rem;color:var(--muted)"><span style="width:16px;height:3px;border-radius:2px;background:${s.color};display:inline-block"></span>${s.label}</span>`).join('');
+
+      document.getElementById('trend').innerHTML = `
+        <div style="display:flex;gap:1.1rem;flex-wrap:wrap;margin-bottom:.6rem">${legend}</div>
+        <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Variance trend over the month">
+          ${grid}
+          <line x1="${pl}" y1="${zeroY}" x2="${W - pr}" y2="${zeroY}" stroke="#c9ced6" stroke-dasharray="3 3" />
+          ${lines}${xLabels}
+        </svg>`;
+    }
+
+    function renderRecentAudits() {
+      const rows = STORE.audits.filter(matchWE).slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 5);
+      const pct = (a) => (a.products && a.products.length) ? auditTotals(a).pct : (a.progress || 0);
+      document.getElementById('recentAudits').innerHTML = rows.map((a) => `
+        <tr class="clickable" data-id="${a.id}">
+          <td class="mono"><a class="strong-link" href="audit-counting.html?id=${a.id}">${a.id}</a></td>
+          <td>${warehouseName(STORE, a.warehouseId)}</td>
+          <td>${entityChip(a.entity)}</td>
+          <td>${userName(STORE, a.auditorUserId)}</td>
+          <td>${statusBadge(a.status)}</td>
+          <td><div class="progress"><div class="bar"><span style="width:${pct(a)}%"></span></div><span class="pct">${pct(a)}%</span></div></td>
+          <td class="mono">${fmtDateTime(a.updatedAt)}</td>
+        </tr>`).join('') || `<tr><td colspan="7" class="empty">No audits match.</td></tr>`;
+      const tbody = document.getElementById('recentAudits');
+      wireClickableRows(tbody);
+      tbody.querySelectorAll('tr.clickable').forEach((tr) =>
+        tr.addEventListener('click', (e) => { if (!e.target.closest('a')) location.href = 'audit-counting.html?id=' + tr.dataset.id; }));
+    }
+
+    function renderPendingSettlements() {
+      const rows = STORE.settlements.filter((s) => matchWE(s) && (s.status === 'pending_review' || s.status === 'under_review'))
+        .slice().sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)).slice(0, 5);
+      document.getElementById('pendingSettlements').innerHTML = rows.map((s) => `
+        <tr>
+          <td class="mono strong-link">${s.id}</td>
+          <td class="mono"><a href="audit-counting.html?id=${s.auditId}">${s.auditId}</a></td>
+          <td>${warehouseName(STORE, s.warehouseId)}</td>
+          <td>${entityChip(s.entity)}</td>
+          <td class="mono">${fmtDateTime(s.submittedAt)}</td>
+          <td><span class="badge pri-${s.priority}">${labelize(s.priority)}</span></td>
+        </tr>`).join('') || `<tr><td colspan="6" class="empty">No pending settlements.</td></tr>`;
+    }
+
+    function renderAll() { renderKpis(); renderVarianceSummary(); renderTrend(); renderRecentAudits(); renderPendingSettlements(); }
+
+    loadStore().then((s) => {
+      STORE = s;
+      document.getElementById('content').innerHTML = skeleton();
+      renderShell('dashboard', { user: s.currentUser, crumbTitle: 'Dashboard' });
+
+      const wSel = document.getElementById('dWarehouse');
+      wSel.innerHTML = '<option value="">All Warehouses</option>' + s.warehouses.map((w) => `<option value="${w.id}">${w.name}</option>`).join('');
+      const eSel = document.getElementById('dEntity');
+      eSel.innerHTML = '<option value="">All (FG, RM, Asset)</option>' + s.entities.map((e) => `<option value="${e.id}">${e.name}</option>`).join('');
+      wSel.addEventListener('change', (e) => { dState.warehouse = e.target.value; renderAll(); });
+      eSel.addEventListener('change', (e) => { dState.entity = e.target.value; renderAll(); });
+      document.getElementById('refreshBtn').addEventListener('click', () => { renderAll(); toast('Dashboard refreshed.'); });
+
+      renderAll();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit Sessions — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    const STATUS_TABS = ['all', 'draft', 'in_progress', 'submitted', 'under_review', 'approved', 'closed', 'cancelled'];
+    const PAGE_SIZE = 10;
+    const state = { warehouse: '', entity: '', status: 'all', auditor: '', q: '', page: 1 };
+    let STORE = null;
+
+    function skeleton() {
+      return `
+        <div class="page-head">
+          <div>
+            <h1>Audit Sessions</h1>
+            <div class="sub">View and manage all audit sessions</div>
+          </div>
+          <div class="head-actions">
+            <button class="btn primary" id="createBtn">${svg('plus')} Create Audit</button>
+          </div>
+        </div>
+
+        <section class="filters">
+          <div class="filter-grid">
+            <div class="field"><label>Warehouse</label><select id="fWarehouse"></select></div>
+            <div class="field"><label>Entity</label><select id="fEntity"></select></div>
+            <div class="field"><label>Status</label><select id="fStatus"></select></div>
+            <div class="field"><label>Auditor</label><select id="fAuditor"></select></div>
+            <div class="field"><label>Date Range</label><input type="text" value="01 May 2024 - 31 May 2024" readonly /></div>
+          </div>
+          <div class="filter-actions">
+            <div class="search-wrap grow">${svg('search')}<input type="search" id="fSearch" placeholder="Search by Audit ID, Audit Name, Auditor..." /></div>
+            <button class="btn ghost" id="clearBtn">Clear</button>
+            <button class="btn primary" id="applyBtn">Apply Filters</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="tabs" id="tabs"></div>
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>Audit ID</th><th>Audit Name</th><th>Warehouse</th><th>Entity</th><th>Auditor</th>
+              <th>Status</th><th>Progress</th><th>Counted / Total</th><th>Submitted On</th><th>Updated On</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table></div>
+          <div class="pager" id="pager"></div>
+        </section>`;
+    }
+
+    function fillSelect(el, items, allLabel, valueKey, labelKey) {
+      el.innerHTML = `<option value="">${allLabel}</option>` +
+        items.map((i) => `<option value="${i[valueKey]}">${i[labelKey]}</option>`).join('');
+    }
+
+    function auditProgress(a) {
+      if (a.products && a.products.length) { return auditTotals(a).pct; }
+      return a.progress || 0;
+    }
+    function auditCounted(a) {
+      if (a.products && a.products.length) { const t = auditTotals(a); return t.counted + ' / ' + t.total; }
+      if (a.status === 'cancelled' || a.status === 'draft' && !a.countedTotal) return '–';
+      return (a.countedTotal || 0) + ' / ' + (a.productTotal || 0);
+    }
+
+    function baseFiltered() {
+      // Everything except the status facet (so tab counts reflect the other filters).
+      return STORE.audits.filter((a) => {
+        if (state.warehouse && a.warehouseId !== state.warehouse) return false;
+        if (state.entity && a.entity !== state.entity) return false;
+        if (state.auditor && a.auditorUserId !== state.auditor) return false;
+        if (state.q) {
+          const hay = (a.id + ' ' + a.name + ' ' + userName(STORE, a.auditorUserId)).toLowerCase();
+          if (!hay.includes(state.q.toLowerCase())) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderTabs() {
+      const base = baseFiltered();
+      const count = (st) => st === 'all' ? base.length : base.filter((a) => a.status === st).length;
+      document.getElementById('tabs').innerHTML = STATUS_TABS.map((st) => `
+        <button class="tab${state.status === st ? ' active' : ''}" data-status="${st}">
+          ${st === 'all' ? 'All' : labelize(st)}<span class="count">${count(st)}</span>
+        </button>`).join('');
+      document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+        state.status = t.dataset.status; state.page = 1;
+        document.getElementById('fStatus').value = state.status === 'all' ? '' : state.status;
+        renderAll();
+      }));
+    }
+
+    function renderRows() {
+      let list = baseFiltered();
+      if (state.status !== 'all') list = list.filter((a) => a.status === state.status);
+      const totalRows = list.length;
+      const pages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+      if (state.page > pages) state.page = pages;
+      const start = (state.page - 1) * PAGE_SIZE;
+      const pageRows = list.slice(start, start + PAGE_SIZE);
+
+      const tbody = document.getElementById('rows');
+      if (!pageRows.length) {
+        tbody.innerHTML = `<tr><td colspan="11" class="empty">No audit sessions match these filters.</td></tr>`;
+      } else {
+        tbody.innerHTML = pageRows.map((a) => {
+          const pct = auditProgress(a);
+          const canContinue = a.status === 'in_progress' || a.status === 'draft';
+          const actionLabel = canContinue ? 'Continue' : 'View';
+          return `<tr class="clickable" data-id="${a.id}">
+            <td class="mono"><a class="strong-link" href="audit-counting.html?id=${a.id}">${a.id}</a></td>
+            <td>${a.name}</td>
+            <td>${warehouseName(STORE, a.warehouseId)}</td>
+            <td>${entityChip(a.entity)}</td>
+            <td>${userName(STORE, a.auditorUserId)}</td>
+            <td>${statusBadge(a.status)}</td>
+            <td><div class="progress"><div class="bar"><span style="width:${pct}%"></span></div><span class="pct">${pct}%</span></div></td>
+            <td class="mono">${auditCounted(a)}</td>
+            <td class="mono">${fmtDateTime(a.submittedAt)}</td>
+            <td class="mono">${fmtDateTime(a.updatedAt)}</td>
+            <td><button class="btn sm" data-action="${a.id}">${actionLabel}</button></td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Pager
+      const showTo = Math.min(start + PAGE_SIZE, totalRows);
+      const showFrom = totalRows ? start + 1 : 0;
+      let btns = `<button class="page-btn" data-page="prev" ${state.page === 1 ? 'disabled' : ''}>‹</button>`;
+      for (let p = 1; p <= pages; p++) btns += `<button class="page-btn${p === state.page ? ' active' : ''}" data-page="${p}">${p}</button>`;
+      btns += `<button class="page-btn" data-page="next" ${state.page === pages ? 'disabled' : ''}>›</button>`;
+      document.getElementById('pager').innerHTML =
+        `<div class="info">Showing ${showFrom} to ${showTo} of ${totalRows} entries</div><div class="controls">${btns}</div>`;
+
+      // Wire rows + actions + pager
+      wireClickableRows(document);
+      tbody.querySelectorAll('tr.clickable').forEach((tr) =>
+        tr.addEventListener('click', (e) => { if (!e.target.closest('button')) location.href = 'audit-counting.html?id=' + tr.dataset.id; }));
+      tbody.querySelectorAll('button[data-action]').forEach((b) =>
+        b.addEventListener('click', () => location.href = 'audit-counting.html?id=' + b.dataset.action));
+      document.querySelectorAll('.page-btn').forEach((b) => b.addEventListener('click', () => {
+        const v = b.dataset.page;
+        if (v === 'prev') state.page = Math.max(1, state.page - 1);
+        else if (v === 'next') state.page = Math.min(pages, state.page + 1);
+        else state.page = Number(v);
+        renderRows();
+      }));
+    }
+
+    function renderAll() { renderTabs(); renderRows(); }
+
+    function createAudit() {
+      const seqs = STORE.audits.map((a) => { const m = /AUD-2405-(\d+)/.exec(a.id); return m ? Number(m[1]) : 0; });
+      const nextNum = String(Math.max(0, ...seqs) + 1).padStart(3, '0');
+      const id = 'AUD-2405-' + nextNum;
+      STORE.audits.unshift({
+        id, name: 'New Stock Audit — ' + id, warehouseId: 'WH-01', entity: 'FG',
+        auditorUserId: STORE.counterUser.id, status: 'draft', createdAt: nowIso(), updatedAt: nowIso(),
+        submittedAt: null, progress: 0, countedTotal: 0, productTotal: 0, products: [],
+      });
+      saveStore(STORE);
+      state.status = 'all'; state.page = 1;
+      document.getElementById('fStatus').value = '';
+      renderAll();
+      toast('Draft ' + id + ' created.');
+    }
+
+    loadStore().then((s) => {
+      STORE = s;
+      document.getElementById('content').innerHTML = skeleton();
+      renderShell('audit-sessions', { user: s.currentUser, crumbTitle: 'Audit Sessions' });
+
+      fillSelect(document.getElementById('fWarehouse'), s.warehouses, 'All Warehouses', 'id', 'name');
+      const statusEl = document.getElementById('fStatus');
+      statusEl.innerHTML = '<option value="">All Statuses</option>' +
+        STATUS_TABS.filter((x) => x !== 'all').map((x) => `<option value="${x}">${labelize(x)}</option>`).join('');
+      fillSelect(document.getElementById('fEntity'), s.entities, 'All (FG, RM, Asset)', 'id', 'name');
+      fillSelect(document.getElementById('fAuditor'), s.users.filter((u) => u.role === 'Auditor'), 'All Auditors', 'id', 'name');
+
+      const apply = () => {
+        state.warehouse = document.getElementById('fWarehouse').value;
+        state.entity = document.getElementById('fEntity').value;
+        state.status = document.getElementById('fStatus').value || 'all';
+        state.auditor = document.getElementById('fAuditor').value;
+        state.page = 1;
+        renderAll();
+      };
+      document.getElementById('applyBtn').addEventListener('click', apply);
+      document.getElementById('clearBtn').addEventListener('click', () => {
+        ['fWarehouse', 'fEntity', 'fStatus', 'fAuditor', 'fSearch'].forEach((id) => document.getElementById(id).value = '');
+        Object.assign(state, { warehouse: '', entity: '', status: 'all', auditor: '', q: '', page: 1 });
+        renderAll();
+      });
+      document.getElementById('fSearch').addEventListener('input', (e) => { state.q = e.target.value; state.page = 1; renderAll(); });
+      document.getElementById('createBtn').addEventListener('click', createAudit);
+
+      renderAll();
+    });
+  </script>
+</body>
+</html>
