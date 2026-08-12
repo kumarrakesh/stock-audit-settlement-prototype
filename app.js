@@ -5,7 +5,7 @@
    resetStore() wipes back to the original seed. Distinct STORE_KEY from v1 so the two
    prototypes never clobber each other's demo state in the same browser. */
 
-const STORE_KEY = 'fbms_s2_store_v1';
+const STORE_KEY = 'fbms_s2_store_v2'; // bumped on the v1 counting-model migration to force a reseed
 
 function loadStore() {
   const cached = localStorage.getItem(STORE_KEY);
