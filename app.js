@@ -318,3 +318,49 @@ function inlineConfirm(targetEl, o) {
 
 // Auto-open a drawer from ?open=<id> on list pages.
 function openParam() { return qp('open', ''); }
+
+/* ---------- Shared analytics blocks (dashboard + settlement first-half) ---------- */
+function fbKpiCardsHtml(s) {
+  const pendingAudits = s.audits.filter((a) => a.status === 'draft' || a.status === 'in_progress').length;
+  const pendingSettlements = s.audits.filter((a) => a.status === 'submitted' || a.status === 'under_review').length;
+  const pendingTickets = s.actionTickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length;
+  const card = (tile, icon, label, value, sub, link) => `
+    <div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div>
+      <div class="value">${value}</div><div class="sub">${sub}</div>
+      <div class="foot">${link && link.href ? `<a href="${link.href}">${link.text} →</a>` : `<span class="note">${(link && link.text) || ''}</span>`}</div></div>`;
+  return `<div class="kpi-row">${
+    card('blue', 'clipboard', 'Pending Audits', pendingAudits, 'Draft / In Progress', { text: 'View all', href: 'audit-sessions.html' }) +
+    card('orange', 'list', 'Pending Settlements', pendingSettlements, 'Awaiting Review', { text: 'Below', href: null }) +
+    card('purple', 'ticket', 'Pending Action Tickets', pendingTickets, 'Require Attention', { text: 'View tickets', href: 'tickets.html' }) +
+    card('green', 'box', 'Completed Audits', s.dashboard.completedThisMonth, 'This Month', { text: 'View all', href: 'audit-sessions.html' }) +
+    card('teal', 'box', 'Snapshots Created', s.dashboard.snapshotsThisMonth, 'This Month', { text: 'Runs in background', href: null })}</div>`;
+}
+function fbVarianceDonutHtml(s) {
+  const vs = s.dashboard.varianceSummary;
+  const seg = [
+    { key: 'Missing', color: '#b3261e', mag: Math.abs(vs.missing), display: -vs.missing },
+    { key: 'Extra', color: '#1a7f4b', mag: Math.abs(vs.extra), display: vs.extra },
+    { key: 'Waste', color: '#e08a00', mag: Math.abs(vs.waste), display: -vs.waste },
+    { key: 'Expired', color: '#6d28d9', mag: Math.abs(vs.expired), display: -vs.expired },
+  ];
+  const sum = seg.reduce((a, x) => a + x.mag, 0) || 1;
+  let acc = 0;
+  const stops = seg.map((x) => { const from = (acc / sum) * 100; acc += x.mag; const to = (acc / sum) * 100; return `${x.color} ${from}% ${to}%`; }).join(', ');
+  const legend = seg.map((x) => `<div class="row"><span class="sw" style="background:${x.color}"></span><span class="lab">${x.key}</span><span class="val ${x.display < 0 ? 'neg' : 'pos'}">${x.display < 0 ? '' : '+'}${fmtQty(x.display)}</span><span class="share">(${Math.round((x.mag / sum) * 100)}%)</span></div>`).join('');
+  return `<div class="donut-wrap"><div class="donut" style="border-radius:50%;background:conic-gradient(${stops})"><div style="position:absolute;inset:24%;background:var(--card);border-radius:50%"></div><div class="center"><div class="cap">Total Variance</div><div class="big neg">${fmtQty(vs.totalVariance)}</div></div></div><div class="legend">${legend}</div></div><div class="chart-note">All values are in Base Unit (e.g. Kg, Ltr, Nos).</div>`;
+}
+function fbVarianceTrendHtml(s) {
+  const data = s.dashboard.trend;
+  const series = [{ key: 'missing', color: '#b3261e', label: 'Missing' }, { key: 'extra', color: '#1a7f4b', label: 'Extra' }, { key: 'waste', color: '#e08a00', label: 'Waste' }, { key: 'expired', color: '#6d28d9', label: 'Expired' }];
+  const W = 580, H = 220, pl = 44, pr = 12, pt = 12, pb = 30;
+  let min = 0, max = 0;
+  data.forEach((d) => series.forEach((x) => { min = Math.min(min, d[x.key]); max = Math.max(max, d[x.key]); }));
+  const range = (max - min) || 1;
+  const X = (i) => pl + (i * (W - pl - pr)) / (data.length - 1);
+  const Y = (v) => pt + ((max - v) / range) * (H - pt - pb);
+  const grid = [max, max / 2, 0, min / 2, min].map((v) => { const yy = Y(v); return `<line x1="${pl}" y1="${yy}" x2="${W - pr}" y2="${yy}" stroke="#eef0f3" /><text x="${pl - 6}" y="${yy + 3}" text-anchor="end" font-size="9" fill="#9aa2ad">${Math.round(v)}</text>`; }).join('');
+  const xLabels = data.map((d, i) => `<text x="${X(i)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="#9aa2ad">${d.date}</text>`).join('');
+  const lines = series.map((x) => { const pts = data.map((d, i) => `${X(i)},${Y(d[x.key])}`).join(' '); const dots = data.map((d, i) => `<circle cx="${X(i)}" cy="${Y(d[x.key])}" r="2.4" fill="${x.color}" />`).join(''); return `<polyline points="${pts}" fill="none" stroke="${x.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />${dots}`; }).join('');
+  const legend = series.map((x) => `<span style="display:inline-flex;align-items:center;gap:.35rem;font-size:.8rem;color:var(--muted)"><span style="width:16px;height:3px;border-radius:2px;background:${x.color};display:inline-block"></span>${x.label}</span>`).join('');
+  return `<div style="padding:1.1rem 1.25rem"><div style="display:flex;gap:1.1rem;flex-wrap:wrap;margin-bottom:.6rem">${legend}</div><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Variance trend"><rect x="0" y="0" width="${W}" height="${H}" fill="none"/>${grid}<line x1="${pl}" y1="${Y(0)}" x2="${W - pr}" y2="${Y(0)}" stroke="#c9ced6" stroke-dasharray="3 3" />${lines}${xLabels}</svg></div>`;
+}

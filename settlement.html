@@ -12,100 +12,108 @@
   <script src="app.js"></script>
   <script>
     let STORE = null;
-    const view = { card1: 'table', card2: 'table', q: '', selected: {} };
+    const st = { q: '', expanded: {}, selected: {} }; // selected keyed "auditId|pid"
     const PENDING = ['submitted', 'under_review'];
-
     const pendingAudits = () => STORE.audits.filter((a) => PENDING.includes(a.status) && (a.products || []).some(needsResolution));
-    function flatItems() {
-      const out = [];
-      pendingAudits().forEach((a) => (a.products || []).filter(needsResolution).forEach((p) => out.push({ a, p })));
-      return out;
-    }
-    const diffOf = (p) => rowActual(p) - p.expected; // negative = short, matches host visual
+    const variItems = (a) => (a.products || []).filter(needsResolution);
+    const diffOf = (p) => rowActual(p) - p.expected; // negative = short
 
     function skeleton() {
       return `
-        <div class="page-head"><div><h1>Stock Settlement</h1><div class="sub">Resolve variances from completed audits and settle</div></div></div>
-        <div class="two-col" id="cards"></div>
+        <div class="page-head">
+          <div><h1>Stock Settlement</h1><div class="sub">Overview of audits, settlements and action items</div></div>
+          <div class="head-actions">
+            <div class="field" style="min-width:150px"><label>Warehouse</label><select id="fWh" disabled><option>All Warehouses</option></select></div>
+            <div class="field" style="min-width:150px"><label>Entity</label><select id="fEnt" disabled><option>All (FG, RM, Asset)</option></select></div>
+            <div class="field" style="min-width:170px"><label>Date Range</label><input type="text" value="01 May 2024 - 31 May 2024" readonly /></div>
+            <button class="btn primary" id="refreshBtn" style="align-self:flex-end">${svg('refresh')} Refresh</button>
+          </div>
+        </div>
+
+        <!-- First half: analytics -->
+        <div class="kpi-row" id="kpis"></div>
+        <div class="two-col">
+          <section class="panel"><div class="panel-head"><h2>Variance Summary (This Month)</h2></div><div id="donut"></div></section>
+          <section class="panel"><div class="panel-head"><h2>Variance Trend</h2></div><div id="trend"></div></section>
+        </div>
+
+        <!-- Second half: audits to settle (grouped, expandable) -->
         <section class="panel" style="margin-top:1rem">
-          <div class="panel-head"><h2>Products to Settle <span class="sub" id="ptsCount"></span></h2>
-            <div style="display:flex;gap:.6rem;align-items:center"><div class="search-wrap" style="min-width:220px">${svg('search')}<input type="search" id="ptsSearch" placeholder="Search product / audit…" /></div>
-              <button class="btn primary" id="bulkBtn" disabled>Bulk Resolve (0)</button></div></div>
-          <div class="table-wrap"><table>
-            <thead><tr><th style="width:34px"></th><th>Product</th><th>Audit</th><th>Warehouse</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Difference</th><th>Status</th><th></th></tr></thead>
-            <tbody id="pts"></tbody>
-          </table></div>
+          <div class="panel-head"><h2>Audits to Settle <span class="sub" id="auditCount"></span></h2>
+            <div class="search-wrap" style="min-width:240px">${svg('search')}<input type="search" id="auditSearch" placeholder="Search audit ID / name / warehouse…" /></div></div>
+          <div id="auditList"></div>
         </section>`;
     }
 
-    /* ---------------- Analytics cards (graph / table toggle) ---------------- */
-    function renderCards() {
-      const audits = pendingAudits();
-      const toggle = (card, cur) => `<div class="seg"><button class="seg-btn${cur === 'graph' ? ' active' : ''}" data-card="${card}" data-v="graph">Graph</button><button class="seg-btn${cur === 'table' ? ' active' : ''}" data-card="${card}" data-v="table">Table</button></div>`;
-
-      // Card 1 — Pending Audits & total variance
-      const maxVar = Math.max(1, ...audits.map((a) => Math.abs(auditTotals(a).variance)));
-      const c1graph = `<div class="bars">${audits.map((a) => { const v = auditTotals(a).variance; const w = Math.round(Math.abs(v) / maxVar * 100); return `<div class="bar-row"><span class="bl mono">${a.id}</span><div class="bt"><span class="${v > 0 ? 'bneg' : 'bpos'}" style="width:${w}%"></span></div><span class="bv ${v > 0 ? 'neg' : 'pos'}">${(v > 0 ? '+' : '') + fmtQty(v)}</span></div>`; }).join('') || '<div class="empty">No pending audits.</div>'}</div>`;
-      const c1table = `<div class="table-wrap"><table><thead><tr><th>Audit</th><th>Warehouse</th><th>Entity</th><th class="num">Items</th><th class="num">Net Variance</th></tr></thead><tbody>${audits.map((a) => { const t = auditTotals(a); const items = (a.products || []).filter(needsResolution).length; return `<tr class="clickable" data-aud="${a.id}"><td class="mono">${a.id}</td><td>${warehouseName(STORE, a.warehouseId)}</td><td>${entityChip(a.entity)}</td><td class="num mono">${items}</td><td class="num mono">${varianceCell(t.variance)}</td></tr>`; }).join('') || '<tr><td colspan="5" class="empty">No pending audits.</td></tr>'}</tbody></table></div>`;
-
-      // Card 2 — Leakage (waste / expired)
-      let leak = audits.map((a) => { let waste = 0, expired = 0; (a.products || []).forEach((p) => { waste += num(p.verifiedWaste); expired += num(p.verifiedExpired); }); return { a, waste, expired }; });
-      const maxLeak = Math.max(1, ...leak.map((x) => x.waste + x.expired));
-      const c2graph = `<div class="bars">${leak.map((x) => `<div class="bar-row"><span class="bl mono">${x.a.id}</span><div class="bt stacked"><span class="bwaste" style="width:${Math.round(x.waste / maxLeak * 100)}%"></span><span class="bexp" style="width:${Math.round(x.expired / maxLeak * 100)}%"></span></div><span class="bv sub">${fmtQty(x.waste + x.expired)}</span></div>`).join('') || '<div class="empty">No leakage.</div>'}</div><div class="legend-row"><span><span class="sw" style="background:#e08a00"></span>Waste</span><span><span class="sw" style="background:#6d28d9"></span>Expired</span></div>`;
-      const c2table = `<div class="table-wrap"><table><thead><tr><th>Audit</th><th class="num">Waste</th><th class="num">Expired</th><th class="num">Total Leakage</th></tr></thead><tbody>${leak.map((x) => `<tr class="clickable" data-aud="${x.a.id}"><td class="mono">${x.a.id}</td><td class="num mono">${fmtQty(x.waste)}</td><td class="num mono">${fmtQty(x.expired)}</td><td class="num mono">${fmtQty(x.waste + x.expired)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">No leakage.</td></tr>'}</tbody></table></div>`;
-
-      document.getElementById('cards').innerHTML = `
-        <section class="panel"><div class="panel-head"><h2>Pending Audits — Total Variance</h2>${toggle('card1', view.card1)}</div><div class="card-pad">${view.card1 === 'graph' ? c1graph : c1table}</div></section>
-        <section class="panel"><div class="panel-head"><h2>Leakage Report — Waste / Expired</h2>${toggle('card2', view.card2)}</div><div class="card-pad">${view.card2 === 'graph' ? c2graph : c2table}</div></section>`;
-      document.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => { view[b.dataset.card] = b.dataset.v; renderCards(); }));
-      document.querySelectorAll('#cards tr.clickable').forEach((tr) => { wireClickableRows(tr.parentNode); tr.addEventListener('click', () => openAuditFirstItem(tr.dataset.aud)); });
-    }
-    function openAuditFirstItem(auditId) {
-      const a = byId(STORE.audits, auditId); const first = (a.products || []).find(needsResolution);
-      if (first) openResolveDrawer(a.id, first.productId); else toast('No variance items on this audit.');
+    function renderFirstHalf() {
+      document.getElementById('kpis').innerHTML = fbKpiCardsHtml(STORE);
+      document.getElementById('donut').innerHTML = fbVarianceDonutHtml(STORE);
+      document.getElementById('trend').innerHTML = fbVarianceTrendHtml(STORE);
+      document.querySelectorAll('#kpis a').forEach((a) => { if (!a.getAttribute('href')) a.addEventListener('click', (e) => e.preventDefault()); });
     }
 
-    /* ---------------- Products to settle list ---------------- */
-    function renderList() {
-      let items = flatItems();
-      if (view.q) items = items.filter(({ a, p }) => (p.name + ' ' + p.sku + ' ' + a.id).toLowerCase().includes(view.q.toLowerCase()));
-      document.getElementById('ptsCount').textContent = `(${items.length})`;
-      const tbody = document.getElementById('pts');
-      if (!items.length) { tbody.innerHTML = `<tr><td colspan="9" class="empty">Nothing to settle — no open variance items.</td></tr>`; }
-      else tbody.innerHTML = items.map(({ a, p }) => { const c = computeRow(p); const key = a.id + '|' + p.productId; const resolved = (p.resolution || {}).status === 'resolved';
-        return `<tr class="clickable" data-aud="${a.id}" data-pid="${p.productId}">
-          <td>${resolved ? '' : `<input type="checkbox" class="sel" data-key="${key}" ${view.selected[key] ? 'checked' : ''} />`}</td>
-          <td><strong>${p.name}</strong><div class="sub mono">${p.batchNo} · ${classify(p)}</div></td>
-          <td class="mono">${a.id}</td><td>${warehouseName(STORE, a.warehouseId)}</td>
-          <td class="num mono">${fmtQty(p.expected)}</td><td class="num mono">${fmtQty(c.actual)}</td>
-          <td class="num mono"><span class="${diffOf(p) < 0 ? 'neg' : diffOf(p) > 0 ? 'pos' : 'zero'}">${(diffOf(p) > 0 ? '+' : '') + fmtQty(diffOf(p))}</span></td>
-          <td>${resolved ? statusBadge('resolved') : statusBadge('pending_review')}${(p.resolution || {}).ticketId ? ' <span class="mono tlink" data-tid="' + p.resolution.ticketId + '" style="cursor:pointer;color:var(--blue)">' + p.resolution.ticketId + '</span>' : ''}</td>
-          <td><button class="btn sm" data-aud="${a.id}" data-pid="${p.productId}">${resolved ? 'View' : 'View & Resolve'}</button></td></tr>`; }).join('');
-      wireClickableRows(tbody);
-      tbody.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button') && !e.target.closest('input') && !e.target.closest('.tlink')) openResolveDrawer(tr.dataset.aud, tr.dataset.pid); }));
-      tbody.querySelectorAll('button[data-pid]').forEach((b) => b.addEventListener('click', () => openResolveDrawer(b.dataset.aud, b.dataset.pid)));
-      tbody.querySelectorAll('.tlink').forEach((el) => el.addEventListener('click', () => location.href = 'tickets.html?open=' + el.dataset.tid));
-      tbody.querySelectorAll('.sel').forEach((cb) => cb.addEventListener('change', () => { view.selected[cb.dataset.key] = cb.checked; updateBulk(); }));
-      updateBulk();
+    /* ---------------- Second half: grouped-by-audit expandable list ---------------- */
+    function renderAuditList() {
+      let audits = pendingAudits();
+      if (st.q) audits = audits.filter((a) => (a.id + ' ' + a.name + ' ' + warehouseName(STORE, a.warehouseId)).toLowerCase().includes(st.q.toLowerCase()));
+      document.getElementById('auditCount').textContent = `(${audits.length})`;
+      const host = document.getElementById('auditList');
+      if (!audits.length) { host.innerHTML = '<div class="empty">Nothing to settle — no open variance items.</div>'; return; }
+      host.innerHTML = audits.map((a) => {
+        const items = variItems(a);
+        const openItems = items.filter((p) => (p.resolution || {}).status !== 'resolved').length;
+        const expanded = !!st.expanded[a.id];
+        const rows = items.map((p) => { const c = computeRow(p); const key = a.id + '|' + p.productId; const resolved = (p.resolution || {}).status === 'resolved'; const d = diffOf(p);
+          return `<tr class="clickable" data-aud="${a.id}" data-pid="${p.productId}">
+            <td style="width:34px">${resolved ? '' : `<input type="checkbox" class="sel" data-key="${key}" ${st.selected[key] ? 'checked' : ''} />`}</td>
+            <td><strong>${p.name}</strong><div class="sub mono">${p.batchNo} · ${classify(p)}</div></td>
+            <td class="num mono">${fmtQty(p.expected)}</td><td class="num mono">${fmtQty(c.actual)}</td>
+            <td class="num mono"><span class="${d < 0 ? 'neg' : d > 0 ? 'pos' : 'zero'}">${(d > 0 ? '+' : '') + fmtQty(d)}</span></td>
+            <td>${resolved ? statusBadge('resolved') : statusBadge('pending_review')}${(p.resolution || {}).ticketId ? ' <span class="mono tlink" data-tid="' + p.resolution.ticketId + '" style="cursor:pointer;color:var(--blue)">' + p.resolution.ticketId + '</span>' : ''}</td>
+            <td style="text-align:right"><button class="btn sm" data-aud="${a.id}" data-pid="${p.productId}">${resolved ? 'View' : 'View & Resolve'}</button></td></tr>`; }).join('');
+        const selCount = items.filter((p) => st.selected[a.id + '|' + p.productId] && (p.resolution || {}).status !== 'resolved').length;
+        return `<div class="settle-item ${expanded ? 'open' : ''}" data-aud="${a.id}">
+          <div class="settle-head" data-toggle="${a.id}">
+            <span class="sdot ${openItems ? 'red' : 'green'}"></span>
+            <div class="stitle"><b>${a.name}</b><div class="sub mono">${a.id} · ${warehouseName(STORE, a.warehouseId)} · ${A_date(a)}</div></div>
+            <span class="scol"><span class="mismatch-badge">${svg('box')} ${items.length} Product Mismatch</span></span>
+            <span class="scol"><span class="status-open">${openItems ? 'Open' : 'Ready'}</span></span>
+            <span class="scol sub">Updated ${fmtDateTime(a.updatedAt)}</span>
+            <span class="scol schev">▸</span>
+          </div>
+          ${expanded ? `<div class="mismatch-panel">
+            <div class="mm-head">Mismatch Products (${items.length})</div>
+            <div class="table-wrap"><table><thead><tr><th></th><th>Product</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Difference</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+            <div class="mm-foot"><span class="sel-note">${selCount ? selCount + ' item(s) selected' : 'No items selected'}</span><button class="btn sm ghost" data-clear="${a.id}">Clear selection</button><button class="btn sm primary" data-bulk="${a.id}" ${selCount ? '' : 'disabled'}>Bulk Resolve (${selCount})</button></div>
+          </div>` : ''}
+        </div>`;
+      }).join('');
+
+      // wire expand/collapse
+      host.querySelectorAll('.settle-head[data-toggle]').forEach((el) => el.addEventListener('click', (e) => { if (e.target.closest('input,button,.tlink')) return; const id = el.dataset.toggle; st.expanded[id] = !st.expanded[id]; renderAuditList(); }));
+      // product row / view & resolve
+      const openRes = (aud, pid) => openResolveDrawer(aud, pid);
+      host.querySelectorAll('tr.clickable').forEach((tr) => { wireClickableRows(tr.parentNode); tr.addEventListener('click', (e) => { if (e.target.closest('button,input,.tlink')) return; openRes(tr.dataset.aud, tr.dataset.pid); }); });
+      host.querySelectorAll('button[data-pid]').forEach((b) => b.addEventListener('click', () => openRes(b.dataset.aud, b.dataset.pid)));
+      host.querySelectorAll('.tlink').forEach((el) => el.addEventListener('click', () => location.href = 'tickets.html?open=' + el.dataset.tid));
+      host.querySelectorAll('.sel').forEach((cb) => cb.addEventListener('change', () => { st.selected[cb.dataset.key] = cb.checked; renderAuditList(); }));
+      host.querySelectorAll('button[data-clear]').forEach((b) => b.addEventListener('click', () => { const aid = b.dataset.clear; Object.keys(st.selected).forEach((k) => { if (k.startsWith(aid + '|')) st.selected[k] = false; }); renderAuditList(); }));
+      host.querySelectorAll('button[data-bulk]').forEach((b) => b.addEventListener('click', () => bulkResolve(b.dataset.bulk)));
     }
-    function updateBulk() {
-      const n = Object.values(view.selected).filter(Boolean).length;
-      const b = document.getElementById('bulkBtn'); b.textContent = `Bulk Resolve (${n})`; b.disabled = n === 0;
-    }
-    function bulkResolve() {
-      const keys = Object.keys(view.selected).filter((k) => view.selected[k]);
-      let made = 0;
-      keys.forEach((k) => { const [aid, pid] = k.split('|'); const a = byId(STORE.audits, aid); const p = (a.products || []).find((x) => x.productId === pid); if (!p) return;
+    function A_date(a) { return a.auditDate || fmtDateTime(a.submittedAt); }
+
+    function bulkResolve(auditId) {
+      const a = byId(STORE.audits, auditId); let made = 0, n = 0;
+      variItems(a).forEach((p) => { const key = auditId + '|' + p.productId; if (!st.selected[key] || (p.resolution || {}).status === 'resolved') return; n++;
         const cls = classify(p); const opt = resolutionOptionsFor(STORE, cls)[0] || {}; p.resolution = Object.assign({}, p.resolution, { optionId: opt.id, status: 'resolved' });
-        if (opt.ticket && !p.resolution.ticketId) { createTicket(a, p, opt); made++; } });
-      view.selected = {}; saveStore(STORE); settleFullyResolved();
-      renderCards(); renderList(); toast(`Resolved ${keys.length} item(s)${made ? ', ' + made + ' ticket(s) created' : ''}.`);
+        if (opt.ticket && !p.resolution.ticketId) { createTicket(a, p, opt); made++; } st.selected[key] = false; });
+      saveStore(STORE); const settled = settleFullyResolved();
+      renderFirstHalf(); renderAuditList(); toast(`Resolved ${n} item(s)${made ? ', ' + made + ' ticket(s) created' : ''}${settled.includes(auditId) ? '. Audit settled.' : ''}.`);
     }
 
-    /* ---------------- Per-product resolve drawer: 4 tabs ---------------- */
+    /* ---------------- Per-product resolve drawer: 4 tabs (unchanged) ---------------- */
     function afterSettlement(p, opt) {
-      const c = computeRow(p); const short = Math.max(c.missing, 0);
-      const list = [];
+      const c = computeRow(p); const short = Math.max(c.missing, 0); const list = [];
       if (opt.id === 'write_off') list.push(`Write off ${fmtQty(short || num(p.verifiedWaste) + num(p.verifiedExpired))} units as inventory loss`);
       if (opt.id === 'recovery') list.push('Raise a recovery ticket to the responsible party');
       if (opt.id === 'action_item') list.push('Open an action ticket to investigate');
@@ -118,28 +126,19 @@
     }
     function openResolveDrawer(auditId, pid) {
       const a = byId(STORE.audits, auditId); const p = (a.products || []).find((x) => x.productId === pid); if (!p) return;
-      p.__auditId = a.id;
-      const settled = ['approved', 'closed'].includes(a.status);
+      p.__auditId = a.id; const settled = ['approved', 'closed'].includes(a.status);
       const h = openDrawer({
         title: `${p.name} — ${classify(p)}`, subtitle: `${a.id} · ${warehouseName(STORE, a.warehouseId)} · ${entityChip(a.entity)}`,
         tabs: [{ key: 'details', label: 'Details' }, { key: 'evidence', label: 'Evidence' }, { key: 'activity', label: 'Activity Log' }, { key: 'comments', label: 'Comments' }], active: 'details',
-        onClose: () => { renderCards(); renderList(); },
-        render(key, body, foot) {
-          foot.innerHTML = '';
-          if (key === 'evidence') return renderEv(p, body);
-          if (key === 'activity') return renderActivity(a, p, body);
-          if (key === 'comments') return renderComments(p, body);
-          renderResolveDetails(a, p, settled, body, foot, h);
-        },
+        onClose: () => { renderFirstHalf(); renderAuditList(); },
+        render(key, body, foot) { foot.innerHTML = ''; if (key === 'evidence') return renderEv(p, body); if (key === 'activity') return renderActivity(a, p, body); if (key === 'comments') return renderComments(p, body); renderResolveDetails(a, p, settled, body, foot, h); },
       });
       h.refresh();
     }
     function irow(icon, tile, label, value, note) { return `<div class="ir"><div class="tile ${tile}">${svg(icon)}</div><div class="ir-b"><div class="ir-l">${label}</div><div class="ir-v">${value}</div></div>${note ? `<div class="ir-note">${note}</div>` : ''}</div>`; }
     function renderResolveDetails(a, p, settled, body, foot, h) {
       const c = computeRow(p), cls = classify(p), opts = resolutionOptionsFor(STORE, cls), r = p.resolution || {};
-      const selId = r.optionId || (opts[0] && opts[0].id), sel = resolutionOption(STORE, cls, selId) || {};
-      const diff = diffOf(p);
-      const after = afterSettlement(p, sel);
+      const selId = r.optionId || (opts[0] && opts[0].id), sel = resolutionOption(STORE, cls, selId) || {}, diff = diffOf(p);
       body.innerHTML = `
         <div class="ir-list">
           ${irow('clipboard', 'green', 'Expected', fmtQty(p.expected), 'as per audit scope')}
@@ -152,60 +151,31 @@
         <div class="split-fields ${sel.split ? 'on' : ''}" id="splitF"><div class="field"><label>Recover qty</label><input type="number" id="recQty" min="0" step="0.001" value="${r.recoveredQty || ''}" ${settled ? 'disabled' : ''}/></div><div class="field"><label>Write-off qty</label><input type="number" id="woQty" min="0" step="0.001" value="${r.writeOffQty || ''}" ${settled ? 'disabled' : ''}/></div></div>
         <div class="field" style="margin-top:.6rem"><label>Note</label><input type="text" id="resNote" value="${(r.note || '').replace(/"/g, '&quot;')}" ${settled ? 'disabled' : ''} placeholder="optional" /></div>
         <h3 class="section-title">After settlement</h3>
-        <ul class="checklist" id="afterList">${after.map((x) => `<li>${x}</li>`).join('')}</ul>`;
+        <ul class="checklist" id="afterList">${afterSettlement(p, sel).map((x) => `<li>${x}</li>`).join('')}</ul>`;
       const refreshAfter = () => { const cur = resolutionOption(STORE, cls, body.querySelector('input[name=res]:checked').value) || {}; body.querySelector('#splitF').classList.toggle('on', !!cur.split); body.querySelector('#afterList').innerHTML = afterSettlement(p, cur).map((x) => `<li>${x}</li>`).join(''); };
       if (!settled) {
         body.querySelectorAll('input[name=res]').forEach((rb) => rb.addEventListener('change', refreshAfter));
         const readRes = () => ({ optionId: body.querySelector('input[name=res]:checked').value, recoveredQty: Number(body.querySelector('#recQty').value) || 0, writeOffQty: Number(body.querySelector('#woQty').value) || 0, note: body.querySelector('#resNote').value });
         foot.innerHTML = '<button class="btn" id="keepBtn">Keep Pending</button><button class="btn primary" id="resolveBtn">Resolve</button>';
         foot.querySelector('#keepBtn').addEventListener('click', () => { p.resolution = Object.assign({}, p.resolution, readRes(), { status: 'pending' }); saveStore(STORE); toast('Kept pending.'); closeDrawer(); });
-        foot.querySelector('#resolveBtn').addEventListener('click', () => {
-          const data = readRes(); p.resolution = Object.assign({}, p.resolution, data, { status: 'resolved' });
-          const opt = resolutionOption(STORE, cls, data.optionId) || {};
-          let msg = 'Item resolved.';
-          if (opt.ticket && !p.resolution.ticketId) { const id = createTicket(a, p, opt); msg = 'Resolved — recovery ticket ' + id + ' created.'; }
-          saveStore(STORE); const settledNow = settleFullyResolved(); toast(msg + (settledNow.includes(a.id) ? ' Audit settled; snapshot runs in background.' : '')); closeDrawer();
-        });
+        foot.querySelector('#resolveBtn').addEventListener('click', () => { const data = readRes(); p.resolution = Object.assign({}, p.resolution, data, { status: 'resolved' }); const opt = resolutionOption(STORE, cls, data.optionId) || {}; let msg = 'Item resolved.'; if (opt.ticket && !p.resolution.ticketId) { const id = createTicket(a, p, opt); msg = 'Resolved — recovery ticket ' + id + ' created.'; } saveStore(STORE); const settledNow = settleFullyResolved(); toast(msg + (settledNow.includes(a.id) ? ' Audit settled; snapshot runs in background.' : '')); closeDrawer(); });
       } else { foot.innerHTML = '<span class="lock-note" style="color:var(--green);background:var(--green-bg)">✓ Settled</span>'; }
     }
-    function renderEv(p, body) {
-      const ev = p.evidence || { photos: [], documents: [] };
-      const chips = [].concat((ev.photos || []).map((x) => `<span class="ev-chip">📷 ${x.caption || 'Photo'}</span>`), (ev.documents || []).map((x) => `<span class="ev-chip">📄 ${x.name}</span>`));
-      body.innerHTML = `<div class="help">Evidence captured during counting.</div><div class="evidence" style="margin-top:.6rem">${chips.length ? chips.join('') : '<span class="notice">No evidence.</span>'}</div>`;
-    }
-    function renderActivity(a, p, body) {
-      const items = [{ w: userName(STORE, a.auditorUserId), t: 'Counted — variance flagged (' + classify(p) + ')', when: a.submittedAt }];
-      if ((p.resolution || {}).status) items.push({ w: STORE.currentUser.name, t: 'Resolution: ' + labelize((p.resolution.status || '')) + ((resolutionOption(STORE, classify(p), p.resolution.optionId) || {}).label ? ' — ' + resolutionOption(STORE, classify(p), p.resolution.optionId).label : ''), when: a.updatedAt });
-      if ((p.resolution || {}).ticketId) items.push({ w: STORE.currentUser.name, t: 'Recovery ticket ' + p.resolution.ticketId + ' created', when: a.updatedAt });
-      body.innerHTML = items.map((x) => `<div class="comment"><div><span class="who">${x.w}</span><span class="when">${fmtDateTime(x.when)}</span></div><div class="text">${x.t}</div></div>`).join('');
-    }
-    function renderComments(p, body) {
-      p.settlementComments = p.settlementComments || [];
-      body.innerHTML = `<div id="clist">${p.settlementComments.length ? p.settlementComments.map((c) => `<div class="comment"><div><span class="who">${c.who}</span><span class="when">${fmtDateTime(c.when)}</span></div><div class="text">${c.text}</div></div>`).join('') : '<span class="notice">No comments yet.</span>'}</div>
-        <div class="comment-box"><textarea id="newC" placeholder="Add a comment…"></textarea><div class="actions-row" style="margin-top:0"><button class="btn primary" id="addC">Add comment</button></div></div>`;
-      body.querySelector('#addC').addEventListener('click', () => { const t = body.querySelector('#newC').value.trim(); if (!t) { toast('Write a comment first.'); return; } p.settlementComments.push({ who: STORE.currentUser.name, when: nowIso(), text: t }); saveStore(STORE); renderComments(p, body); toast('Comment added.'); });
-    }
-    function createTicket(a, p, opt) {
-      const id = nextSeqId(STORE.actionTickets, 'AT-2405-');
-      STORE.actionTickets.unshift({ id, auditId: a.id, productId: p.productId, warehouseId: a.warehouseId, entity: a.entity, title: `${opt.label} — ${p.name}`, description: `Auto-created from settlement of ${a.id}. ${classify(p)} on ${p.name} (${p.batchNo}). ${p.reasonNarrative || ''}`.trim(), status: 'open', priority: classify(p) === 'MISSING' ? 'high' : 'medium', assignedToUserId: a.auditorUserId, createdByUserId: STORE.currentUser.id, createdAt: nowIso(), comments: [] });
-      p.resolution.ticketId = id; return id;
-    }
-    function settleFullyResolved() {
-      const settled = [];
-      pendingAudits().forEach((a) => { const items = (a.products || []).filter(needsResolution); if (items.length && items.every((p) => (p.resolution || {}).status === 'resolved')) { a.status = 'approved'; a.updatedAt = nowIso(); settled.push(a.id); } });
-      if (settled.length) saveStore(STORE);
-      return settled;
-    }
+    function renderEv(p, body) { const ev = p.evidence || { photos: [], documents: [] }; const chips = [].concat((ev.photos || []).map((x) => `<span class="ev-chip">📷 ${x.caption || 'Photo'}</span>`), (ev.documents || []).map((x) => `<span class="ev-chip">📄 ${x.name}</span>`)); body.innerHTML = `<div class="help">Evidence captured during counting.</div><div class="evidence" style="margin-top:.6rem">${chips.length ? chips.join('') : '<span class="notice">No evidence.</span>'}</div>`; }
+    function renderActivity(a, p, body) { const items = [{ w: userName(STORE, a.auditorUserId), t: 'Counted — variance flagged (' + classify(p) + ')', when: a.submittedAt }]; if ((p.resolution || {}).status) items.push({ w: STORE.currentUser.name, t: 'Resolution: ' + labelize(p.resolution.status || '') + ((resolutionOption(STORE, classify(p), p.resolution.optionId) || {}).label ? ' — ' + resolutionOption(STORE, classify(p), p.resolution.optionId).label : ''), when: a.updatedAt }); if ((p.resolution || {}).ticketId) items.push({ w: STORE.currentUser.name, t: 'Recovery ticket ' + p.resolution.ticketId + ' created', when: a.updatedAt }); body.innerHTML = items.map((x) => `<div class="comment"><div><span class="who">${x.w}</span><span class="when">${fmtDateTime(x.when)}</span></div><div class="text">${x.t}</div></div>`).join(''); }
+    function renderComments(p, body) { p.settlementComments = p.settlementComments || []; body.innerHTML = `<div id="clist">${p.settlementComments.length ? p.settlementComments.map((c) => `<div class="comment"><div><span class="who">${c.who}</span><span class="when">${fmtDateTime(c.when)}</span></div><div class="text">${c.text}</div></div>`).join('') : '<span class="notice">No comments yet.</span>'}</div><div class="comment-box"><textarea id="newC" placeholder="Add a comment…"></textarea><div class="actions-row" style="margin-top:0"><button class="btn primary" id="addC">Add comment</button></div></div>`; body.querySelector('#addC').addEventListener('click', () => { const t = body.querySelector('#newC').value.trim(); if (!t) { toast('Write a comment first.'); return; } p.settlementComments.push({ who: STORE.currentUser.name, when: nowIso(), text: t }); saveStore(STORE); renderComments(p, body); toast('Comment added.'); }); }
+    function createTicket(a, p, opt) { const id = nextSeqId(STORE.actionTickets, 'AT-2405-'); STORE.actionTickets.unshift({ id, auditId: a.id, productId: p.productId, warehouseId: a.warehouseId, entity: a.entity, title: `${opt.label} — ${p.name}`, description: `Auto-created from settlement of ${a.id}. ${classify(p)} on ${p.name} (${p.batchNo}). ${p.reasonNarrative || ''}`.trim(), status: 'open', priority: classify(p) === 'MISSING' ? 'high' : 'medium', assignedToUserId: a.auditorUserId, createdByUserId: STORE.currentUser.id, createdAt: nowIso(), comments: [] }); p.resolution.ticketId = id; return id; }
+    function settleFullyResolved() { const settled = []; pendingAudits().forEach((a) => { const items = variItems(a); if (items.length && items.every((p) => (p.resolution || {}).status === 'resolved')) { a.status = 'approved'; a.updatedAt = nowIso(); settled.push(a.id); } }); if (settled.length) saveStore(STORE); return settled; }
 
     loadStore().then((s) => {
       STORE = s;
       document.getElementById('content').innerHTML = skeleton();
       renderShell('settlement-queue', { user: s.currentUser, crumbTitle: 'Stock Settlement' });
-      document.getElementById('ptsSearch').addEventListener('input', (e) => { view.q = e.target.value; renderList(); });
-      document.getElementById('bulkBtn').addEventListener('click', bulkResolve);
-      renderCards(); renderList();
+      document.getElementById('auditSearch').addEventListener('input', (e) => { st.q = e.target.value; renderAuditList(); });
+      document.getElementById('refreshBtn').addEventListener('click', () => { renderFirstHalf(); renderAuditList(); toast('Refreshed.'); });
+      renderFirstHalf(); renderAuditList();
       const openId = qp('open', '');
-      if (openId) openAuditFirstItem(openId);
+      if (openId) { st.expanded[openId] = true; renderAuditList(); const a = byId(STORE.audits, openId); const first = a && variItems(a)[0]; if (first) openResolveDrawer(openId, first.productId); }
     });
   </script>
 </body>
