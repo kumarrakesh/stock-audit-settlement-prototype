@@ -339,9 +339,46 @@ textarea { width: 100%; min-height: 84px; padding: .6rem .7rem; border: 1px soli
 .drawer-foot { padding: .9rem 1.25rem; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: .6rem; align-items: center; flex: none; flex-wrap: wrap; }
 .drawer-foot:empty { display: none; }
 
+/* Search-to-add dropdown (count workspace) */
+.add-results { position: absolute; top: 100%; left: 0; right: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12); margin-top: 4px; z-index: 20; max-height: 280px; overflow-y: auto; display: none; }
+.add-results.open { display: block; }
+.add-item { display: block; width: 100%; text-align: left; border: none; background: none; padding: .6rem .8rem; font-family: inherit; font-size: .88rem; cursor: pointer; border-bottom: 1px solid var(--line-2); color: var(--ink); }
+.add-item:hover { background: var(--blue-bg); }
+
 /* Inline confirmation (replaces confirm dialogs) */
 .inline-confirm { display: flex; align-items: center; gap: .8rem; width: 100%; justify-content: space-between; flex-wrap: wrap; background: var(--amber-bg); color: var(--amber); border-radius: 8px; padding: .55rem .85rem; font-size: .85rem; font-weight: 600; }
 .inline-confirm .ic-actions { display: flex; gap: .5rem; }
+
+/* Segmented graph/table toggle */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg-btn { border: none; background: var(--card); font-family: inherit; font-size: .8rem; font-weight: 600; color: var(--muted); padding: .4rem .8rem; min-height: 36px; cursor: pointer; }
+.seg-btn.active { background: var(--blue); color: #fff; }
+
+/* Simple horizontal bar chart */
+.bars { display: flex; flex-direction: column; gap: .6rem; }
+.bar-row { display: flex; align-items: center; gap: .7rem; }
+.bar-row .bl { width: 110px; font-size: .78rem; color: var(--muted); flex: none; }
+.bar-row .bt { flex: 1; height: 12px; background: var(--line-2); border-radius: 999px; overflow: hidden; display: flex; }
+.bar-row .bt > span { display: block; height: 100%; }
+.bar-row .bt .bneg { background: var(--red); } .bar-row .bt .bpos { background: var(--green); }
+.bar-row .bt .bwaste { background: #e08a00; } .bar-row .bt .bexp { background: #6d28d9; }
+.bar-row .bv { width: 84px; text-align: right; font-size: .8rem; font-variant-numeric: tabular-nums; flex: none; }
+.legend-row { display: flex; gap: 1.2rem; margin-top: .8rem; font-size: .8rem; color: var(--muted); }
+.legend-row .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: .35rem; vertical-align: middle; }
+
+/* Icon rows (settlement detail) */
+.ir-list { display: flex; flex-direction: column; gap: .1rem; }
+.ir { display: grid; grid-template-columns: 40px 1fr; gap: .8rem; align-items: start; padding: .7rem 0; border-bottom: 1px solid var(--line-2); }
+.ir .tile { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; } .ir .tile svg { width: 19px; height: 19px; }
+.ir-b .ir-l { font-size: .8rem; color: var(--muted); font-weight: 600; }
+.ir-b .ir-v { font-size: 1.05rem; font-weight: 700; margin-top: .1rem; }
+.ir-b .ir-v .neg, .ir-b .ir-v .pos { font-weight: 700; }
+
+/* Checklist + radio choice rows */
+.checklist { list-style: none; padding: 0; margin: .3rem 0 0; font-size: .88rem; }
+.checklist li { padding: .25rem 0; } .checklist li::before { content: "✓ "; color: var(--green); font-weight: 700; }
+.choice-row { display: flex; align-items: center; gap: .5rem; min-height: 40px; font-size: .9rem; cursor: pointer; }
+.choice-row input { width: auto; min-height: 0; }
 
 /* Modal (L3) */
 .modal-scrim { position: fixed; inset: 0; background: rgba(17,24,39,.45); display: grid; place-items: center; z-index: 90; padding: 1rem; }

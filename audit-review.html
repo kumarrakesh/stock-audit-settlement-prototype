@@ -1,5 +1,5 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8" /><title>Redirecting…</title><script>
-  var p = new URLSearchParams(location.search); var id = p.get('id') || '';
-  location.replace('audit-sessions.html' + (id ? '?open=' + encodeURIComponent(id) + '&tab=review' : ''));
+  var id = new URLSearchParams(location.search).get('id') || '';
+  location.replace('audit-detail.html' + (id ? '?id=' + encodeURIComponent(id) : ''));
 </script></head><body></body></html>

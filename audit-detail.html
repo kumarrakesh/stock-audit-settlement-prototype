@@ -1,5 +1,251 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><title>Redirecting…</title><script>
-  var p = new URLSearchParams(location.search); var id = p.get('id') || '';
-  location.replace('audit-sessions.html' + (id ? '?open=' + encodeURIComponent(id) : ''));
-</script></head><body></body></html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit Counting — Foodbridge Settlement (session-02 prototype)</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <div id="content"></div>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let STORE = null, AUDIT = null, EDIT = null;
+    const cstate = { q: '', location: '', batch: '', status: 'all', page: 1 };
+    const PAGE_SIZE = 8;
+    // Small catalog for "search & add product" (prototype stand-in for the product master).
+    const CATALOG = [
+      { name: 'Milk Pouch 500ml', sku: 'MILK-500', expected: 500 }, { name: 'Paneer 200g', sku: 'PNR-200', expected: 300 },
+      { name: 'Curd 400g', sku: 'CRD-400', expected: 200 }, { name: 'Ghee 500ml', sku: 'GHEE-500', expected: 150 },
+      { name: 'Butter 100g', sku: 'BUT-100', expected: 250 }, { name: 'Cheese Block 1kg', sku: 'CHZ-1KG', expected: 100 },
+      { name: 'Sugar 1kg', sku: 'SUG-1KG', expected: 90 }, { name: 'Wheat Flour 10kg', sku: 'WHF-10', expected: 120 },
+      { name: 'Sunflower Oil 5L', sku: 'OIL-5L', expected: 60 }, { name: 'Basmati Rice 25kg', sku: 'RICE-25', expected: 40 },
+      { name: 'Toned Milk 1L', sku: 'TML-1L', expected: 220 }, { name: 'Ice Cream 1L', sku: 'ICE-1L', expected: 80 },
+    ];
+    function persist() { AUDIT.updatedAt = nowIso(); saveStore(STORE); }
+
+    function skeleton() {
+      const paused = AUDIT.status === 'paused';
+      const canEdit = !EDIT.readonly;
+      return `
+        <a class="back-link" href="audit-sessions.html">← Audit Sessions</a>
+        <div class="page-head">
+          <div>
+            <h1 style="display:flex;align-items:center;gap:.6rem">Audit Counting ${statusBadge(AUDIT.status)}</h1>
+            <div class="sub">${AUDIT.name}</div>
+            <div class="sub" style="margin-top:.5rem">🏠 <strong>Warehouse:</strong> ${warehouseName(STORE, AUDIT.warehouseId)} &nbsp;·&nbsp; 📦 <strong>Entity:</strong> ${entityName(STORE, AUDIT.entity)} &nbsp;·&nbsp; 📅 <strong>Audit Date:</strong> ${AUDIT.auditDate || '—'} &nbsp;·&nbsp; 👤 <strong>Auditor:</strong> ${userName(STORE, AUDIT.auditorUserId)}</div>
+          </div>
+          <div class="head-actions">
+            ${canEdit ? '<button class="btn" id="saveBtn">Save Draft</button>' : ''}
+            ${canEdit ? `<button class="btn" id="pauseBtn">${paused ? 'Resume Audit' : 'Pause Audit'}</button>` : ''}
+            ${canEdit ? '<button class="btn primary" id="reviewBtn">Review &amp; Submit</button>' : '<span class="lock-note">🔒 ' + labelize(AUDIT.status) + ' — read only</span>'}
+          </div>
+        </div>
+        <div class="kpi-row" id="kpis"></div>
+        <section class="panel">
+          <div class="card-pad" style="border-bottom:1px solid var(--line)">
+            ${canEdit ? `<div class="search-wrap" style="margin-bottom:.7rem">${svg('search')}<input type="text" id="addSearch" placeholder="Search product to add into this audit…" autocomplete="off" /><div id="addResults" class="add-results"></div></div>` : ''}
+            <div class="filter-actions">
+              <div class="search-wrap grow">${svg('search')}<input type="search" id="cSearch" placeholder="Filter counted products by name / SKU / batch…" /></div>
+              <select id="cLocation" style="max-width:150px"></select><select id="cBatch" style="max-width:160px"></select>
+              <select id="cStatus" style="max-width:160px"><option value="all">All Statuses</option><option value="counted">Counted</option><option value="partially_counted">Partially Counted</option><option value="not_counted">Not Counted</option></select>
+              <button class="btn ghost" id="cClear">Clear</button>
+            </div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Product Details</th><th>Batch No.</th><th>Location</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Missing</th><th class="num">Variance</th><th>Status</th><th></th></tr></thead>
+            <tbody id="grid"></tbody>
+          </table></div>
+          <div class="count-foot"><span>ⓘ Click a product row to record its count in the side panel. Variance = Expected − Actual (positive = shortfall).</span><span class="saved-note" id="savedNote">Last saved: ${fmtDateTime(AUDIT.updatedAt)}</span></div>
+          <div class="pager" id="cPager"></div>
+        </section>`;
+    }
+
+    function renderKpis() {
+      const t = auditTotals(AUDIT);
+      const varPct = t.expected ? (t.variance / t.expected) * 100 : 0;
+      const kpi = (tile, icon, label, value, foot) => `<div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div><div class="value">${value}</div>${foot || ''}</div>`;
+      document.getElementById('kpis').innerHTML =
+        kpi('blue', 'box', 'Total Products', t.total, `<div class="sub">Counted: ${t.counted} (${t.pct}%)</div>`) +
+        kpi('purple', 'db', 'Total Expected', fmtQty(t.expected), '<div class="sub">Base Unit</div>') +
+        kpi('green', 'clipboard', 'Total Actual', fmtQty(t.actual), '<div class="sub">Base Unit</div>') +
+        kpi('orange', 'chart', 'Total Variance', `<span class="${t.variance > 0 ? 'neg' : t.variance < 0 ? 'pos' : 'zero'}">${(t.variance > 0 ? '+' : '') + fmtQty(t.variance)}</span>`, `<div class="foot"><span class="${t.variance > 0 ? 'neg' : 'pos'}">${varPct.toFixed(2)}%</span></div>`) +
+        kpi('red', 'list', 'Missing', `<span class="neg">${fmtQty(t.missing)}</span>`, '') +
+        kpi('green', 'plus', 'Extra', `<span class="pos">${fmtQty(t.extra)}</span>`, '');
+    }
+
+    function filteredRows() {
+      return (AUDIT.products || []).filter((p) => {
+        if (cstate.location && p.location !== cstate.location) return false;
+        if (cstate.batch && p.batchNo !== cstate.batch) return false;
+        if (cstate.status !== 'all' && computeRow(p).status !== cstate.status) return false;
+        if (cstate.q) { const h = (p.name + ' ' + p.sku + ' ' + p.batchNo).toLowerCase(); if (!h.includes(cstate.q.toLowerCase())) return false; }
+        return true;
+      });
+    }
+    function renderGrid() {
+      const list = filteredRows(), pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+      if (cstate.page > pages) cstate.page = pages;
+      const start = (cstate.page - 1) * PAGE_SIZE, rows = list.slice(start, start + PAGE_SIZE);
+      const grid = document.getElementById('grid');
+      if (!rows.length) { grid.innerHTML = `<tr><td colspan="9" class="empty">No products yet.${EDIT.readonly ? '' : ' Use the search bar above to add products.'}</td></tr>`; }
+      else grid.innerHTML = rows.map((p) => { const c = computeRow(p); return `<tr class="clickable" data-pid="${p.productId}">
+        <td><strong>${p.name}</strong><div class="sub mono">SKU: ${p.sku}</div></td><td class="mono">${p.batchNo}</td><td class="mono">${p.location}</td>
+        <td class="num mono">${fmtQty(p.expected)}</td><td class="num mono">${c.counted ? fmtQty(c.actual) : '<span class="notice">—</span>'}</td>
+        <td class="num mono">${c.missing === null ? '—' : (c.missing > 0 ? '<span class="neg">' + fmtQty(c.missing) + '</span>' : '0.000')}</td>
+        <td class="num mono">${varianceCell(c.variance)}</td><td>${statusBadge(c.counted ? c.status : 'not_counted')}</td>
+        <td><button class="btn sm" data-pid="${p.productId}">${EDIT.readonly ? 'View' : 'Count'}</button></td></tr>`; }).join('');
+      const showFrom = list.length ? start + 1 : 0, showTo = Math.min(start + PAGE_SIZE, list.length);
+      let btns = `<button class="page-btn" data-page="prev" ${cstate.page === 1 ? 'disabled' : ''}>‹</button>`;
+      for (let p = 1; p <= pages; p++) btns += `<button class="page-btn${p === cstate.page ? ' active' : ''}" data-page="${p}">${p}</button>`;
+      btns += `<button class="page-btn" data-page="next" ${cstate.page === pages ? 'disabled' : ''}>›</button>`;
+      document.getElementById('cPager').innerHTML = `<div class="info">Showing ${showFrom} to ${showTo} of ${list.length} products</div><div class="controls">${btns}</div>`;
+      const open = (pid) => openProductDrawer(pid);
+      wireClickableRows(grid);
+      grid.querySelectorAll('tr.clickable').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('button')) open(tr.dataset.pid); }));
+      grid.querySelectorAll('button[data-pid]').forEach((b) => b.addEventListener('click', () => open(b.dataset.pid)));
+      document.querySelectorAll('#cPager .page-btn').forEach((b) => b.addEventListener('click', () => { const v = b.dataset.page; if (v === 'prev') cstate.page = Math.max(1, cstate.page - 1); else if (v === 'next') cstate.page = Math.min(pages, cstate.page + 1); else cstate.page = Number(v); renderGrid(); }));
+    }
+
+    /* ---------------- Per-product drawer: Details / Evidence (v1 fields) ---------------- */
+    function openProductDrawer(pid) {
+      const P = (AUDIT.products || []).find((x) => x.productId === pid); if (!P) return;
+      const ro = EDIT.readonly;
+      const h = openDrawer({
+        title: P.name, subtitle: `SKU ${P.sku} · Batch ${P.batchNo} · ${P.location}`,
+        tabs: [{ key: 'details', label: 'Details' }, { key: 'evidence', label: 'Evidence' }], active: 'details',
+        onClose: () => { renderGrid(); renderKpis(); },
+        render(key, body, foot) {
+          foot.innerHTML = '';
+          if (key === 'evidence') { renderEvidence(P, ro, body); return; }
+          renderDetails(P, ro, body, foot, h);
+        },
+      });
+      h.refresh();
+    }
+    function renderDetails(P, ro, body, foot, h) {
+      const showExtra = num(P.extra) > 0 || P._showExtra;
+      const dis = ro ? 'disabled' : '';
+      body.innerHTML = `
+        <div class="help" style="margin-bottom:.8rem">Expected: <strong>${fmtQty(P.expected)}</strong> (as per audit scope)</div>
+        <div class="form-grid">
+          <div class="field"><label>Batch number (optional)</label><input type="text" id="f_batch" value="${(P.batchNo || '').replace(/"/g, '&quot;')}" ${dis} /></div>
+          <div class="field"><label>Expiry date (optional)</label><input type="date" id="f_expiry" value="${P.expiryDate || ''}" ${dis} /></div>
+          <div class="field"><label>Verified OK</label><input type="number" id="f_ok" min="0" step="0.001" value="${P.verifiedOk == null ? '' : P.verifiedOk}" ${dis} /></div>
+          <div class="field"><label>Verified expired</label><input type="number" id="f_exp" min="0" step="0.001" value="${P.verifiedExpired == null ? '' : P.verifiedExpired}" ${dis} /></div>
+          <div class="field"><label>Verified waste</label><input type="number" id="f_waste" min="0" step="0.001" value="${P.verifiedWaste == null ? '' : P.verifiedWaste}" ${dis} /></div>
+          <div class="field"><label>Missing (auto)</label><input type="number" id="f_missing" value="" disabled /></div>
+        </div>
+        <div style="margin:.6rem 0">${showExtra ? `<div class="field"><label>Extra (surplus found)</label><input type="number" id="f_extra" min="0" step="0.001" value="${P.extra == null ? '' : P.extra}" ${dis} /></div>` : (ro ? '' : '<button class="btn link" id="foundExtra">Found extra units?</button>')}</div>
+        <div class="field"><label>Comments / notes</label><textarea id="f_comments" ${dis}>${P.comments || ''}</textarea></div>
+        <div class="rl-nums" style="margin-top:1rem"><span class="n">Actual <b id="dActual">—</b></span><span class="n">Variance <b id="dVariance">—</b></span><span class="n">Status <b id="dStatus">—</b></span></div>`;
+      const derive = () => {
+        if (!ro) {
+          const g = (id) => { const el = document.getElementById(id); return el && el.value !== '' ? Number(el.value) : null; };
+          P.verifiedOk = g('f_ok');
+          if (P.verifiedOk === null) { P.verifiedExpired = null; P.verifiedWaste = null; P.extra = null; }
+          else { P.verifiedExpired = g('f_exp') || 0; P.verifiedWaste = g('f_waste') || 0; if (showExtra) P.extra = g('f_extra') || 0; else if (P.extra == null) P.extra = 0; }
+          P.batchNo = document.getElementById('f_batch').value.trim() || P.batchNo;
+          P.expiryDate = document.getElementById('f_expiry').value;
+          P.comments = document.getElementById('f_comments').value.trim();
+        }
+        const c = computeRow(P);
+        const mEl = document.getElementById('f_missing'); if (mEl) mEl.value = c.missing == null ? '' : fmtQty(c.missing);
+        document.getElementById('dActual').textContent = c.counted ? fmtQty(c.actual) : '—';
+        document.getElementById('dVariance').innerHTML = varianceCell(c.variance);
+        document.getElementById('dStatus').innerHTML = statusBadge(c.counted ? c.status : 'not_counted');
+      };
+      derive();
+      if (!ro) {
+        ['f_ok', 'f_exp', 'f_waste', 'f_extra'].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener('input', derive); });
+        const fe = document.getElementById('foundExtra'); if (fe) fe.addEventListener('click', () => { P._showExtra = true; P.extra = P.extra || 0; renderDetails(P, ro, body, foot, h); });
+        foot.innerHTML = '<button class="btn primary" id="pSave">Save</button>';
+        foot.querySelector('#pSave').addEventListener('click', () => { derive(); persist(); document.getElementById('savedNote').textContent = 'Last saved: ' + fmtDateTime(AUDIT.updatedAt); toast('Saved.'); closeDrawer(); });
+      }
+    }
+    function renderEvidence(P, ro, body) {
+      const ev = P.evidence || { photos: [], documents: [] };
+      const chips = [].concat((ev.photos || []).map((x) => `<span class="ev-chip">📷 ${x.caption || 'Photo'}</span>`), (ev.documents || []).map((x) => `<span class="ev-chip">📄 ${x.name || 'Doc'}</span>`));
+      body.innerHTML = `<div class="help">Evidence is optional.</div>
+        ${ro ? '' : '<div class="actions-row" style="justify-content:flex-start;margin:.6rem 0"><button class="btn" id="addPhoto">📷 Add photo</button><button class="btn" id="addDoc">📄 Add document</button></div>'}
+        <div class="evidence" id="evList">${chips.length ? chips.join('') : '<span class="notice">No evidence captured.</span>'}</div>`;
+      if (!ro) {
+        document.getElementById('addPhoto').addEventListener('click', () => { P.evidence = P.evidence || { photos: [], documents: [] }; (P.evidence.photos = P.evidence.photos || []).push({ caption: 'Photo ' + (P.evidence.photos.length + 1) }); persist(); renderEvidence(P, ro, body); });
+        document.getElementById('addDoc').addEventListener('click', () => { P.evidence = P.evidence || { photos: [], documents: [] }; (P.evidence.documents = P.evidence.documents || []).push({ name: 'document-' + (P.evidence.documents.length + 1) + '.pdf' }); persist(); renderEvidence(P, ro, body); });
+      }
+    }
+
+    /* ---------------- Search-to-add ---------------- */
+    function renderAddResults(q) {
+      const box = document.getElementById('addResults'); if (!box) return;
+      if (!q) { box.classList.remove('open'); box.innerHTML = ''; return; }
+      const have = new Set((AUDIT.products || []).map((p) => p.sku));
+      const matches = CATALOG.filter((c) => !have.has(c.sku) && (c.name + ' ' + c.sku).toLowerCase().includes(q.toLowerCase())).slice(0, 6);
+      box.classList.add('open');
+      box.innerHTML = matches.length ? matches.map((c) => `<button class="add-item" data-sku="${c.sku}">${c.name} <span class="sub mono">${c.sku} · exp ${c.expected}</span></button>`).join('')
+        : `<div class="add-item sub">No unaudited product matches “${q}”.</div>`;
+      box.querySelectorAll('.add-item[data-sku]').forEach((b) => b.addEventListener('click', () => {
+        const c = CATALOG.find((x) => x.sku === b.dataset.sku);
+        AUDIT.products = AUDIT.products || [];
+        AUDIT.products.push({ productId: 'NP-' + AUDIT.id.slice(-3) + '-' + (AUDIT.products.length + 1), name: c.name, sku: c.sku, batchNo: '—', location: '—', expected: c.expected, verifiedOk: null, verifiedExpired: null, verifiedWaste: null, extra: null, expiryDate: '' });
+        if (AUDIT.status === 'draft') AUDIT.status = 'in_progress';
+        persist(); document.getElementById('addSearch').value = ''; box.classList.remove('open'); box.innerHTML = '';
+        refreshFilters(); renderKpis(); renderGrid(); toast(c.name + ' added.');
+        openProductDrawer(AUDIT.products[AUDIT.products.length - 1].productId);
+      }));
+    }
+
+    /* ---------------- Review & Submit (modal confirm) ---------------- */
+    function reviewSubmit() {
+      const rows = AUDIT.products || [];
+      const t = auditTotals(AUDIT);
+      const notCounted = rows.filter((p) => !computeRow(p).counted);
+      const variItems = rows.filter(needsResolution);
+      openModal('Review &amp; Submit',
+        `<div class="kpi-row" style="margin:0 0 1rem">
+          ${['Products|' + t.counted + ' / ' + t.total, 'Expected|' + fmtQty(t.expected), 'Actual|' + fmtQty(t.actual)].map((x) => { const [l, v] = x.split('|'); return `<div class="kpi"><div class="label">${l}</div><div class="value" style="font-size:1.2rem">${v}</div></div>`; }).join('')}
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">
+          ${notCounted.length ? `<span class="lock-note">⚠ ${notCounted.length} not counted</span>` : ''}
+          ${variItems.length ? `<span class="lock-note" style="color:var(--blue-dark);background:var(--blue-bg)">ℹ ${variItems.length} variance item(s) → settlement</span>` : ''}
+          ${!notCounted.length && !variItems.length ? '<span class="lock-note" style="color:var(--green);background:var(--green-bg)">✓ Ready to submit</span>' : ''}
+        </div>
+        <p class="help">Submitting moves this audit to the Settlement Queue.${notCounted.length ? ' Uncounted products are recorded as <strong>not counted</strong>.' : ''}</p>`,
+        `<button class="btn ghost" id="rvCancel">Back</button><button class="btn primary" id="rvSubmit">Submit Audit</button>`);
+      document.getElementById('rvCancel').addEventListener('click', closeModal);
+      document.getElementById('rvSubmit').addEventListener('click', () => { AUDIT.status = 'submitted'; AUDIT.submittedAt = nowIso(); persist(); closeModal(); toast('Audit submitted — now in the Settlement Queue.'); setTimeout(() => location.href = 'settlement.html', 1000); });
+    }
+
+    function distinct(arr, k) { return [...new Set(arr.map((x) => x[k]))]; }
+    function refreshFilters() {
+      const loc = document.getElementById('cLocation'), bat = document.getElementById('cBatch');
+      if (loc) loc.innerHTML = '<option value="">All Locations</option>' + distinct(AUDIT.products || [], 'location').filter(Boolean).sort().map((l) => `<option value="${l}">${l}</option>`).join('');
+      if (bat) bat.innerHTML = '<option value="">All Batches</option>' + distinct(AUDIT.products || [], 'batchNo').filter(Boolean).sort().map((b) => `<option value="${b}">${b}</option>`).join('');
+    }
+
+    loadStore().then((s) => {
+      STORE = s;
+      AUDIT = byId(s.audits, qp('id', '')) || s.audits[0];
+      EDIT = auditEditable(AUDIT);
+      document.getElementById('content').innerHTML = skeleton();
+      renderShell('audit-sessions', { user: s.currentUser, crumbs: [{ label: 'Audit Sessions', href: 'audit-sessions.html' }, { label: AUDIT.id, href: 'audit-detail.html?id=' + AUDIT.id }, { label: 'Audit Counting' }] });
+      refreshFilters(); renderKpis(); renderGrid();
+      if (!EDIT.readonly) {
+        const as = document.getElementById('addSearch');
+        as.addEventListener('input', (e) => renderAddResults(e.target.value.trim()));
+        as.addEventListener('blur', () => setTimeout(() => { const b = document.getElementById('addResults'); if (b) b.classList.remove('open'); }, 180));
+        document.getElementById('saveBtn').addEventListener('click', () => { persist(); document.getElementById('savedNote').textContent = 'Last saved: ' + fmtDateTime(AUDIT.updatedAt); toast('Draft saved.'); });
+        document.getElementById('pauseBtn').addEventListener('click', (e) => { if (AUDIT.status === 'paused') { AUDIT.status = 'in_progress'; e.target.textContent = 'Pause Audit'; toast('Resumed.'); } else { AUDIT.status = 'paused'; e.target.textContent = 'Resume Audit'; toast('Paused.'); } persist(); });
+        document.getElementById('reviewBtn').addEventListener('click', reviewSubmit);
+      }
+      document.getElementById('cSearch').addEventListener('input', (e) => { cstate.q = e.target.value; cstate.page = 1; renderGrid(); });
+      document.getElementById('cLocation').addEventListener('change', (e) => { cstate.location = e.target.value; cstate.page = 1; renderGrid(); });
+      document.getElementById('cBatch').addEventListener('change', (e) => { cstate.batch = e.target.value; cstate.page = 1; renderGrid(); });
+      document.getElementById('cStatus').addEventListener('change', (e) => { cstate.status = e.target.value; cstate.page = 1; renderGrid(); });
+      document.getElementById('cClear').addEventListener('click', () => { Object.assign(cstate, { q: '', location: '', batch: '', status: 'all', page: 1 }); document.getElementById('cSearch').value = ''; document.getElementById('cLocation').value = ''; document.getElementById('cBatch').value = ''; document.getElementById('cStatus').value = 'all'; renderGrid(); });
+      if (qp('product', '')) openProductDrawer(qp('product', ''));
+    });
+  </script>
+</body>
+</html>

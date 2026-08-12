@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8" /><title>Redirecting…</title><script>
   var p = new URLSearchParams(location.search); var a = p.get('auditId') || ''; var pid = p.get('productId') || '';
-  var q = a ? '?open=' + encodeURIComponent(a) + (pid ? '&product=' + encodeURIComponent(pid) : '') : '';
-  location.replace('audit-sessions.html' + q);
+  location.replace('audit-detail.html' + (a ? '?id=' + encodeURIComponent(a) + (pid ? '&product=' + encodeURIComponent(pid) : '') : ''));
 </script></head><body></body></html>

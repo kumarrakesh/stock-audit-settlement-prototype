@@ -49,34 +49,30 @@ function labelize(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g
 function statusBadge(status) { return `<span class="badge st-${status}">${labelize(status)}</span>`; }
 function entityChip(e) { return `<span class="chip ent-${e}">${e}</span>`; }
 
-/* ---------- The counting model (locked, documented) --------------------------
-   The auditor records four physical observations per product row:
-     actual  — good units physically counted
-     expired — units found expired
-     waste   — units found damaged/unusable
-     extra   — surplus units found beyond what was expected
-   Derived:
-     missing  = max(expected − (actual + expired + waste), 0)   // expected units not located in any state
-     variance = extra − missing                                 // net: + surplus, − shortfall
-   Constraint (live-validated, mirrors the mockup footer):
-     actual + expired + waste ≤ expected + extra
+/* ---------- The counting model (v1-aligned) ----------------------------------
+   The auditor records per product: verifiedOk (good), verifiedExpired, verifiedWaste,
+   and extra (surplus found beyond expected). Derived:
+     actual   = verifiedOk + verifiedExpired + verifiedWaste + extra
+     missing  = max(expected − actual, 0)        // shortfall not located in any state
+     variance = expected − actual                // POSITIVE = shortfall, NEGATIVE = surplus
    Status:
-     not_counted        — actual is null (never entered)
-     counted            — actual entered AND missing === 0 (fully reconciled)
-     partially_counted  — actual entered AND missing > 0 (shortfall still open)
-   NOTE: negative variance = shortfall here. This sign convention is a deliberate design
-   choice from the session-02 mockups, under test in this iteration. */
+     not_counted        — verifiedOk is null (never entered)
+     counted            — entered AND missing === 0 (fully reconciled / surplus)
+     partially_counted  — entered AND missing > 0 (shortfall still open)
+   This matches the ratified v1 discovery convention (Expected − Actual, positive = shortfall)
+   and the session-02 feedback-iteration-01 per-product count drawer. */
 function num(v) { return (v === null || v === undefined || v === '') ? 0 : Number(v) || 0; }
+function rowActual(p) { return num(p.verifiedOk) + num(p.verifiedExpired) + num(p.verifiedWaste) + num(p.extra); }
 function computeRow(p) {
-  if (p.actual === null || p.actual === undefined) {
-    return { counted: false, missing: null, variance: null, status: 'not_counted', valid: true };
+  if (p.verifiedOk === null || p.verifiedOk === undefined) {
+    return { counted: false, actual: null, missing: null, variance: null, status: 'not_counted', valid: true };
   }
-  const actual = num(p.actual), expired = num(p.expired), waste = num(p.waste), extra = num(p.extra);
-  const missing = Math.max(p.expected - (actual + expired + waste), 0);
-  const variance = extra - missing;
-  const valid = (actual + expired + waste) <= (p.expected + extra);
+  const actual = rowActual(p);
+  const missing = Math.max(p.expected - actual, 0);
+  const variance = p.expected - actual;
+  const valid = actual >= 0 && num(p.verifiedOk) >= 0 && num(p.verifiedExpired) >= 0 && num(p.verifiedWaste) >= 0 && num(p.extra) >= 0;
   const status = missing === 0 ? 'counted' : 'partially_counted';
-  return { counted: true, missing, variance, status, valid };
+  return { counted: true, actual, missing, variance, status, valid };
 }
 function auditTotals(audit) {
   const rows = audit.products || [];
@@ -84,16 +80,17 @@ function auditTotals(audit) {
   rows.forEach((p) => {
     expected += p.expected;
     const c = computeRow(p);
-    if (c.counted) { counted += 1; actual += num(p.actual); variance += c.variance; missing += c.missing; extra += num(p.extra); }
+    if (c.counted) { counted += 1; actual += c.actual; variance += c.variance; missing += c.missing; extra += num(p.extra); }
   });
   const total = rows.length;
   return { expected, actual, variance, missing, extra, counted, total,
     pct: total ? Math.round((counted / total) * 100) : 0 };
 }
+// Audit variance display: POSITIVE = shortfall (red), NEGATIVE = surplus (green).
 function varianceCell(v) {
   if (v === null || v === undefined) return '<span class="notice">—</span>';
   if (v === 0) return '<span class="zero">0.000</span>';
-  const cls = v < 0 ? 'neg' : 'pos';
+  const cls = v > 0 ? 'neg' : 'pos';
   const sign = v > 0 ? '+' : '';
   return `<span class="${cls}">${sign}${fmtQty(v)}</span>`;
 }
@@ -217,8 +214,8 @@ function classify(p) {
   if (p.classification) return p.classification;
   const c = computeRow(p);
   if (num(p.extra) > 0 && (c.missing || 0) === 0) return 'EXTRA';
-  if (num(p.expired) >= num(p.waste) && num(p.expired) > 0) return 'EXPIRED';
-  if (num(p.waste) > 0) return 'WASTE';
+  if (num(p.verifiedExpired) >= num(p.verifiedWaste) && num(p.verifiedExpired) > 0) return 'EXPIRED';
+  if (num(p.verifiedWaste) > 0) return 'WASTE';
   return 'MISSING';
 }
 function resolutionOptionsFor(s, classification) { return (s.resolutionOptions && s.resolutionOptions[classification]) || []; }
