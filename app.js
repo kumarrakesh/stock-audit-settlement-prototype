@@ -318,6 +318,11 @@ function inlineConfirm(targetEl, o) {
 // Auto-open a drawer from ?open=<id> on list pages.
 function openParam() { return qp('open', ''); }
 
+// Reusable KPI card.
+function kpiCardHtml(tile, icon, label, value, sub) {
+  return `<div class="kpi"><div class="top"><div class="tile ${tile}">${svg(icon)}</div><div class="label">${label}</div></div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+}
+
 /* ---------- Shared analytics blocks (dashboard + settlement first-half) ---------- */
 function fbKpiCardsHtml(s) {
   const pendingAudits = s.audits.filter((a) => a.status === 'draft' || a.status === 'in_progress').length;

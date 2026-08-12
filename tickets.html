@@ -21,6 +21,7 @@
       return `
         <div class="page-head"><div><h1>Action Tickets</h1><div class="sub">Recovery &amp; follow-up tickets</div></div>
           <div class="head-actions"><button class="btn primary" id="createBtn">${svg('plus')} Create Ticket</button></div></div>
+        <div class="kpi-row" id="kpis"></div>
         <section class="filters"><div class="filter-actions">
           <div class="field" style="min-width:160px"><label>Priority</label><select id="fPri"><option value="">All Priorities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
           <div class="field" style="min-width:180px"><label>Assignee</label><select id="fAss"></select></div>
@@ -41,6 +42,17 @@
         if (st.q) { const h = (t.id + ' ' + t.title + ' ' + (t.auditId || '')).toLowerCase(); if (!h.includes(st.q.toLowerCase())) return false; }
         return true;
       });
+    }
+    function renderKpis() {
+      const t = STORE.actionTickets;
+      const n = (arr) => t.filter((x) => arr.includes(x.status)).length;
+      const highActive = t.filter((x) => x.priority === 'high' && (x.status === 'open' || x.status === 'in_progress')).length;
+      document.getElementById('kpis').innerHTML =
+        kpiCardHtml('blue', 'ticket', 'Total Tickets', t.length, '') +
+        kpiCardHtml('red', 'list', 'Open', n(['open']), 'Awaiting action') +
+        kpiCardHtml('orange', 'refresh', 'In Progress', n(['in_progress']), 'Being worked') +
+        kpiCardHtml('green', 'box', 'Resolved / Closed', n(['resolved', 'closed']), 'Done') +
+        kpiCardHtml('purple', 'chart', 'High Priority', highActive, 'Open + In Progress');
     }
     function renderTabs() {
       const b = base(); const count = (tab) => tab === 'all' ? b.length : b.filter((t) => t.status === tab).length;
@@ -67,7 +79,7 @@
       const h = openDrawer({
         title: T.title, subtitle: `${T.id} · ${statusBadge(T.status)}${T.auditId ? ' · from ' + T.auditId : ''}`,
         tabs: [{ key: 'details', label: 'Details' }, { key: 'comments', label: 'Comments' }, { key: 'activity', label: 'Activity' }], active: 'details',
-        onClose: () => { renderTabs(); renderRows(); },
+        onClose: () => { renderKpis(); renderTabs(); renderRows(); },
         render(key, body, foot) {
           foot.innerHTML = '';
           if (key === 'details') renderDetails(T, body, foot, h);
@@ -163,7 +175,7 @@
         const title = document.getElementById('tTitle').value.trim(); if (!title) { toast('Title is required.'); return; }
         const id = nextSeqId(STORE.actionTickets, 'AT-2405-');
         STORE.actionTickets.unshift({ id, auditId: document.getElementById('tAudit').value || null, productId: null, warehouseId: document.getElementById('tWh').value, entity: document.getElementById('tEnt').value, title, description: document.getElementById('tDesc').value.trim(), status: 'open', priority: document.getElementById('tPri').value, assignedToUserId: document.getElementById('tAssignee').value, createdByUserId: STORE.currentUser.id, createdAt: nowIso(), comments: [] });
-        saveStore(STORE); closeModal(); toast('Ticket ' + id + ' created & assigned.'); renderTabs(); renderRows(); openTicketDrawer(id);
+        saveStore(STORE); closeModal(); toast('Ticket ' + id + ' created & assigned.'); renderKpis(); renderTabs(); renderRows(); openTicketDrawer(id);
       });
     }
 
@@ -176,7 +188,7 @@
       document.getElementById('fAss').addEventListener('change', (e) => { st.assignee = e.target.value; renderTabs(); renderRows(); });
       document.getElementById('fSearch').addEventListener('input', (e) => { st.q = e.target.value; renderTabs(); renderRows(); });
       document.getElementById('createBtn').addEventListener('click', createModal);
-      renderTabs(); renderRows();
+      renderKpis(); renderTabs(); renderRows();
       const openId = openParam();
       if (openId && byId(STORE.actionTickets, openId)) openTicketDrawer(openId);
     });
