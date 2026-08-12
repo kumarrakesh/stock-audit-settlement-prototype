@@ -353,18 +353,20 @@ textarea { width: 100%; min-height: 84px; padding: .6rem .7rem; border: 1px soli
 .settle-item { border-bottom: 1px solid var(--line); }
 .settle-item:last-child { border-bottom: none; }
 .settle-item.open { background: #f6fbf8; }
-.settle-head { display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; cursor: pointer; }
+.settle-head { display: flex; align-items: center; gap: 1.5rem; padding: 1rem 1.5rem; cursor: pointer; }
 .settle-head:hover { background: var(--line-2); }
 .settle-item.open .settle-head:hover { background: transparent; }
 .settle-head .sdot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .sdot.red { background: var(--red); } .sdot.green { background: var(--green); }
 .settle-head .stitle { flex: 1; min-width: 0; }
-.settle-head .stitle b { display: block; }
-.settle-head .stitle .sub { margin-top: .1rem; }
-.settle-head .scol { flex: none; font-size: .85rem; }
-.settle-head .schev { color: var(--muted); transition: transform .15s ease; }
+.settle-head .stitle b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settle-head .stitle .sub { margin-top: .1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settle-head .s-status { flex: none; font-size: .85rem; white-space: nowrap; width: 64px; }
+.settle-head .s-updated { flex: none; font-size: .82rem; white-space: nowrap; width: 180px; text-align: right; }
+.settle-head .schev { flex: none; color: var(--muted); font-size: 1.1rem; transition: transform .15s ease; }
 .settle-item.open .schev { transform: rotate(90deg); }
-.mismatch-badge { display: inline-flex; align-items: center; gap: .35rem; font-size: .76rem; font-weight: 700; color: var(--amber); border: 1px solid #f0d9a0; background: var(--amber-bg); border-radius: 999px; padding: .2rem .6rem; }
+.mismatch-badge { flex: none; display: inline-flex; align-items: center; gap: .4rem; font-size: .76rem; font-weight: 700; color: var(--amber); border: 1px solid #f0d9a0; background: var(--amber-bg); border-radius: 999px; padding: .3rem .7rem; white-space: nowrap; }
+.mismatch-badge svg { width: 15px; height: 15px; flex: none; }
 .status-open { color: var(--green); font-weight: 700; } .status-open::before { content: "● "; }
 .mismatch-panel { padding: .2rem 1.25rem 1rem; }
 .mismatch-panel .mm-head { font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; margin: .4rem 0; }

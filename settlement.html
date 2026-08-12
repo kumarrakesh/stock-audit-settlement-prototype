@@ -12,7 +12,7 @@
   <script src="app.js"></script>
   <script>
     let STORE = null;
-    const st = { q: '', expanded: {}, selected: {} }; // selected keyed "auditId|pid"
+    const st = { q: '', expanded: {} };
     const PENDING = ['submitted', 'under_review'];
     const pendingAudits = () => STORE.audits.filter((a) => PENDING.includes(a.status) && (a.products || []).some(needsResolution));
     const variItems = (a) => (a.products || []).filter(needsResolution);
@@ -30,8 +30,7 @@
           </div>
         </div>
 
-        <!-- First half: analytics -->
-        <div class="kpi-row" id="kpis"></div>
+        <!-- First half: analytics (donut + trend) -->
         <div class="two-col">
           <section class="panel"><div class="panel-head"><h2>Variance Summary (This Month)</h2></div><div id="donut"></div></section>
           <section class="panel"><div class="panel-head"><h2>Variance Trend</h2></div><div id="trend"></div></section>
@@ -46,10 +45,8 @@
     }
 
     function renderFirstHalf() {
-      document.getElementById('kpis').innerHTML = fbKpiCardsHtml(STORE);
       document.getElementById('donut').innerHTML = fbVarianceDonutHtml(STORE);
       document.getElementById('trend').innerHTML = fbVarianceTrendHtml(STORE);
-      document.querySelectorAll('#kpis a').forEach((a) => { if (!a.getAttribute('href')) a.addEventListener('click', (e) => e.preventDefault()); });
     }
 
     /* ---------------- Second half: grouped-by-audit expandable list ---------------- */
@@ -63,53 +60,38 @@
         const items = variItems(a);
         const openItems = items.filter((p) => (p.resolution || {}).status !== 'resolved').length;
         const expanded = !!st.expanded[a.id];
-        const rows = items.map((p) => { const c = computeRow(p); const key = a.id + '|' + p.productId; const resolved = (p.resolution || {}).status === 'resolved'; const d = diffOf(p);
+        const rows = items.map((p) => { const c = computeRow(p); const resolved = (p.resolution || {}).status === 'resolved'; const d = diffOf(p);
           return `<tr class="clickable" data-aud="${a.id}" data-pid="${p.productId}">
-            <td style="width:34px">${resolved ? '' : `<input type="checkbox" class="sel" data-key="${key}" ${st.selected[key] ? 'checked' : ''} />`}</td>
             <td><strong>${p.name}</strong><div class="sub mono">${p.batchNo} · ${classify(p)}</div></td>
             <td class="num mono">${fmtQty(p.expected)}</td><td class="num mono">${fmtQty(c.actual)}</td>
             <td class="num mono"><span class="${d < 0 ? 'neg' : d > 0 ? 'pos' : 'zero'}">${(d > 0 ? '+' : '') + fmtQty(d)}</span></td>
             <td>${resolved ? statusBadge('resolved') : statusBadge('pending_review')}${(p.resolution || {}).ticketId ? ' <span class="mono tlink" data-tid="' + p.resolution.ticketId + '" style="cursor:pointer;color:var(--blue)">' + p.resolution.ticketId + '</span>' : ''}</td>
             <td style="text-align:right"><button class="btn sm" data-aud="${a.id}" data-pid="${p.productId}">${resolved ? 'View' : 'View & Resolve'}</button></td></tr>`; }).join('');
-        const selCount = items.filter((p) => st.selected[a.id + '|' + p.productId] && (p.resolution || {}).status !== 'resolved').length;
         return `<div class="settle-item ${expanded ? 'open' : ''}" data-aud="${a.id}">
           <div class="settle-head" data-toggle="${a.id}">
             <span class="sdot ${openItems ? 'red' : 'green'}"></span>
             <div class="stitle"><b>${a.name}</b><div class="sub mono">${a.id} · ${warehouseName(STORE, a.warehouseId)} · ${A_date(a)}</div></div>
-            <span class="scol"><span class="mismatch-badge">${svg('box')} ${items.length} Product Mismatch</span></span>
-            <span class="scol"><span class="status-open">${openItems ? 'Open' : 'Ready'}</span></span>
-            <span class="scol sub">Updated ${fmtDateTime(a.updatedAt)}</span>
-            <span class="scol schev">▸</span>
+            <span class="mismatch-badge">${svg('box', 'mm-ic')} ${items.length} Product Mismatch</span>
+            <span class="s-status status-open">${openItems ? 'Open' : 'Ready'}</span>
+            <span class="s-updated sub">Updated ${fmtDateTime(a.updatedAt)}</span>
+            <span class="schev">▸</span>
           </div>
           ${expanded ? `<div class="mismatch-panel">
             <div class="mm-head">Mismatch Products (${items.length})</div>
-            <div class="table-wrap"><table><thead><tr><th></th><th>Product</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Difference</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-            <div class="mm-foot"><span class="sel-note">${selCount ? selCount + ' item(s) selected' : 'No items selected'}</span><button class="btn sm ghost" data-clear="${a.id}">Clear selection</button><button class="btn sm primary" data-bulk="${a.id}" ${selCount ? '' : 'disabled'}>Bulk Resolve (${selCount})</button></div>
+            <div class="table-wrap"><table><thead><tr><th>Product</th><th class="num">Expected</th><th class="num">Actual</th><th class="num">Difference</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
           </div>` : ''}
         </div>`;
       }).join('');
 
       // wire expand/collapse
-      host.querySelectorAll('.settle-head[data-toggle]').forEach((el) => el.addEventListener('click', (e) => { if (e.target.closest('input,button,.tlink')) return; const id = el.dataset.toggle; st.expanded[id] = !st.expanded[id]; renderAuditList(); }));
+      host.querySelectorAll('.settle-head[data-toggle]').forEach((el) => el.addEventListener('click', (e) => { if (e.target.closest('button,.tlink')) return; const id = el.dataset.toggle; st.expanded[id] = !st.expanded[id]; renderAuditList(); }));
       // product row / view & resolve
       const openRes = (aud, pid) => openResolveDrawer(aud, pid);
-      host.querySelectorAll('tr.clickable').forEach((tr) => { wireClickableRows(tr.parentNode); tr.addEventListener('click', (e) => { if (e.target.closest('button,input,.tlink')) return; openRes(tr.dataset.aud, tr.dataset.pid); }); });
+      host.querySelectorAll('tr.clickable').forEach((tr) => { wireClickableRows(tr.parentNode); tr.addEventListener('click', (e) => { if (e.target.closest('button,.tlink')) return; openRes(tr.dataset.aud, tr.dataset.pid); }); });
       host.querySelectorAll('button[data-pid]').forEach((b) => b.addEventListener('click', () => openRes(b.dataset.aud, b.dataset.pid)));
       host.querySelectorAll('.tlink').forEach((el) => el.addEventListener('click', () => location.href = 'tickets.html?open=' + el.dataset.tid));
-      host.querySelectorAll('.sel').forEach((cb) => cb.addEventListener('change', () => { st.selected[cb.dataset.key] = cb.checked; renderAuditList(); }));
-      host.querySelectorAll('button[data-clear]').forEach((b) => b.addEventListener('click', () => { const aid = b.dataset.clear; Object.keys(st.selected).forEach((k) => { if (k.startsWith(aid + '|')) st.selected[k] = false; }); renderAuditList(); }));
-      host.querySelectorAll('button[data-bulk]').forEach((b) => b.addEventListener('click', () => bulkResolve(b.dataset.bulk)));
     }
     function A_date(a) { return a.auditDate || fmtDateTime(a.submittedAt); }
-
-    function bulkResolve(auditId) {
-      const a = byId(STORE.audits, auditId); let made = 0, n = 0;
-      variItems(a).forEach((p) => { const key = auditId + '|' + p.productId; if (!st.selected[key] || (p.resolution || {}).status === 'resolved') return; n++;
-        const cls = classify(p); const opt = resolutionOptionsFor(STORE, cls)[0] || {}; p.resolution = Object.assign({}, p.resolution, { optionId: opt.id, status: 'resolved' });
-        if (opt.ticket && !p.resolution.ticketId) { createTicket(a, p, opt); made++; } st.selected[key] = false; });
-      saveStore(STORE); const settled = settleFullyResolved();
-      renderFirstHalf(); renderAuditList(); toast(`Resolved ${n} item(s)${made ? ', ' + made + ' ticket(s) created' : ''}${settled.includes(auditId) ? '. Audit settled.' : ''}.`);
-    }
 
     /* ---------------- Per-product resolve drawer: 4 tabs (unchanged) ---------------- */
     function afterSettlement(p, opt) {
