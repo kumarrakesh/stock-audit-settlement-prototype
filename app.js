@@ -100,8 +100,8 @@ function varianceCell(v) {
    aren't part of this prototype iteration are honestly stubbed (toast on click),
    never dead links that look real. */
 const NAV = [
-  { key: 'audit-sessions', label: 'Audit Sessions', href: 'audit-sessions.html', icon: 'clipboard' },
   { key: 'settlement-queue', label: 'Settlement Queue', href: 'settlement.html', icon: 'list' },
+  { key: 'audit-sessions', label: 'Audit Sessions', href: 'audit-sessions.html', icon: 'clipboard' },
   { key: 'action-tickets', label: 'Action Tickets', href: 'tickets.html', icon: 'ticket' },
 ];
 const ICONS = {
